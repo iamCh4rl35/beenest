@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#FF8A00">
+<title>BEENest — Panel sterowania</title>
+<style>
+  /* ---------- Reset & zmienne ---------- */
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+  :root{
+    --orange:      #FF8A00;
+    --orange-dark: #E07600;
+    --orange-soft: #FFF3E3;
+    --black:       #0F0F10;
+    --muted:       #6E6E73;
+    --line:        #ECECEC;
+    --bg:          #FFFFFF;
+    --radius:      20px;
+    --shadow:      0 4px 20px rgba(15,15,16,.04);
+    --font:        ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  body{
+    font-family: var(--font);
+    font-weight: 600;
+    color: var(--black);
+    background: var(--bg);
+    line-height: 1.4;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- Górny pasek ---------- */
+  .topbar{
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between;
+    flex-wrap: wrap; /* pozwala na zawinięcie daty na małych ekranach */
+    gap: 10px;
+    padding: 15px clamp(16px, 3vw, 30px) 10px;
+    background: var(--bg);
+    flex-shrink: 0;
+  }
+
+  .logo{
+    font-size: clamp(26px, 3.5vw, 34px); 
+    font-weight: 900; 
+    letter-spacing: 2px;
+    color: var(--black); 
+    text-decoration: none;
+    line-height: 1;
+  }
+  .logo span { color: var(--orange); }
+
+  .datetime {
+    font-size: clamp(13px, 1.6vw, 16px);
+    font-weight: 800;
+    color: var(--black);
+    letter-spacing: 0.3px;
+    text-align: right;
+  }
+
+  .divider {
+    height: 2px;
+    background: var(--line);
+    margin: 0 clamp(16px, 3vw, 30px);
+    flex-shrink: 0;
+  }
+
+  /* ---------- Główny kontener ---------- */
+  main{
+    flex: 1; 
+    width: 100%;
+    max-width: 1600px; 
+    margin: 0 auto;
+    padding: clamp(15px, 2.5vw, 30px);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .page{ display: none; flex: 1; flex-direction: column; animation: fade .22s ease both; }
+  .page.active{ display: flex; }
+
+  @keyframes fade{
+    from{ opacity: 0; transform: translateY(4px); }
+    to  { opacity: 1; transform: none; }
+  }
+
+  /* ---------- Powitanie ---------- */
+  .greeting-container {
+    margin-bottom: 20px;
+    flex-shrink: 0;
+  }
+  .greeting {
+    font-size: clamp(22px, 2.8vw, 30px);
+    font-weight: 900;
+    letter-spacing: -0.5px;
+  }
+
+  /* ---------- Układ Dashboardu ---------- */
+  .dashboard-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 2.2fr;
+    gap: 20px;
+    min-height: 0;
+  }
+
+  /* --- Wspólne dla kart --- */
+  .temp-tall-card, .dash-card {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border: 4px solid var(--orange-dark); /* GRUBA RAMKA */
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  /* Podświetlany pasek po lewej */
+  .temp-tall-card::before, .dash-card::before {
+    content: ""; position: absolute; inset: 0 auto 0 0; width: 5px;
+    background: var(--orange);
+    transform: scaleY(0); transform-origin: top;
+    transition: transform 0.25s ease;
+  }
+
+  .temp-tall-card:hover, .dash-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--orange); /* jaśniejszy pomarańcz przy hover */
+    box-shadow: 0 10px 30px rgba(255,138,0,.12);
+  }
+  .temp-tall-card:hover::before, .dash-card:hover::before { 
+    transform: scaleY(1); 
+  }
+
+  /* --- Lewa kolumna (Temperatura) --- */
+  .temp-tall-card {
+    padding: 25px 20px 25px 25px;
+  }
+  .icon-large {
+    width: 44px; height: 44px; border-radius: 14px;
+    display: grid; place-items: center;
+    background: var(--orange-soft); color: var(--orange);
+    margin-bottom: 10px;
+  }
+  .icon-large svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+
+  .temp-section {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    flex: 1;
+  }
+  .temp-section.outside {
+    border-bottom: 2px dashed var(--line);
+    padding-bottom: 15px;
+    margin-bottom: 15px;
+  }
+  .temp-label {
+    font-size: clamp(15px, 1.8vw, 18px); /* Większe rozwinięte etykiety */
+    color: var(--muted);
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+  }
+  .temp-value {
+    font-size: clamp(38px, 5vw, 56px);
+    font-weight: 900;
+    letter-spacing: -2px;
+    line-height: 1;
+  }
+  .temp-value .unit {
+    font-size: 0.4em;
+    color: var(--muted);
+    letter-spacing: 0;
+    vertical-align: super;
+  }
+
+  /* --- Prawa kolumna (Siatka 2x2) --- */
+  .right-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 20px;
+    height: 100%;
+  }
+
+  .dash-card {
+    padding: 20px;
+    justify-content: space-between;
+  }
+  .dash-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    font-size: clamp(18px, 2.5vw, 24px); /* Większe nagłówki kart */
+    font-weight: 900;
+    line-height: 1.15;
+  }
+  
+  .ico {
+    width: 40px; height: 40px; border-radius: 12px;
+    display: grid; place-items: center;
+    background: var(--orange-soft); color: var(--orange);
+    flex-shrink: 0;
+  }
+  .ico svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+
+  .dash-card .card-status {
+    font-size: clamp(24px, 3vw, 32px); /* Większy status */
+    font-weight: 900;
+    color: var(--muted);
+    margin-top: 15px;
+  }
+  .dash-card .card-status.highlight { color: var(--orange); }
+
+  /* Karta Monitoring */
+  .dash-card.monitoring {
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    font-size: clamp(26px, 3.5vw, 34px); /* Większy napis */
+    font-weight: 900;
+  }
+  .dash-card.monitoring .arrow {
+    color: var(--orange);
+    margin-left: 5px;
+    transition: transform 0.2s;
+  }
+  .dash-card.monitoring:hover .arrow { transform: translateX(4px); }
+
+  /* Karta Ustawienia */
+  .dash-card.settings {
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    font-size: clamp(24px, 3vw, 30px); /* Większy napis */
+    font-weight: 900;
+    gap: 10px;
+  }
+
+  /* ---------- Style dla Podstron ---------- */
+  .page h1 { font-size: clamp(22px, 3vw, 32px); font-weight: 900; letter-spacing: -.8px; margin-bottom: 6px; }
+  .lead{ margin: 0 0 24px; max-width: 60ch; color: var(--muted); font-weight: 600; font-size: 15px; }
+  .stats{ display: grid; gap: 14px; margin-bottom: 14px; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); }
+  .stat{ padding: 18px; border-radius: 18px; border: 1px solid var(--line); background: #fff; box-shadow: var(--shadow); }
+  .stat .label{ font-size: 12px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); }
+  .stat .value{ margin-top: 6px; font-weight: 900; letter-spacing: -1.2px; font-size: clamp(26px, 4.2vw, 38px); line-height: 1.05; }
+  .stat .value.small{ font-size: clamp(16px, 2.4vw, 20px); letter-spacing: -.4px; }
+  .stat .unit{ margin-left: 4px; font-size: .46em; font-weight: 800; letter-spacing: 0; color: var(--muted); }
+  .stat.primary{ background: var(--orange); border-color: var(--orange); color: #fff; }
+  .stat.primary .label, .stat.primary .unit{ color: rgba(255,255,255,.85); }
+  .panel{ padding: 18px; margin-bottom: 14px; border-radius: 18px; border: 1px solid var(--line); background: #fff; box-shadow: var(--shadow); }
+  .panel .row{ display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14.5px; }
+  .bar{ height: 12px; margin-top: 12px; border-radius: 999px; background: #F1F1F3; overflow: hidden; }
+  .bar > i{ display: block; height: 100%; width: 0%; border-radius: 999px; background: var(--orange); transition: width .45s cubic-bezier(.2,.7,.3,1); }
+  .camera{ position: relative; width: 100%; aspect-ratio: 16 / 9; display: grid; place-items: center; margin-bottom: 14px; border-radius: 18px; border: 1px solid var(--line); background: #101012; overflow: hidden; color: #7a7a80; font-size: 13.5px; font-weight: 700; }
+  .pill{ display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; background: var(--orange-soft); color: var(--orange-dark); font-size: 12.5px; font-weight: 800; }
+  .pill::before{ content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .soon{ display: flex; flex-direction: column; align-items: center; gap: 12px; padding: clamp(28px, 6vw, 56px) 20px; text-align: center; border-radius: 18px; border: 1px dashed var(--line); background: #FAFAFB; }
+  .soon p{ color: var(--muted); font-size: 14px; max-width: 38ch; }
+  .back-btn { display: inline-block; margin-bottom: 20px; padding: 8px 16px; background: var(--orange-soft); color: var(--orange-dark); text-decoration: none; border-radius: 999px; font-size: 14px; font-weight: 800; transition: background 0.2s; align-self: flex-start; }
+  .back-btn:hover { background: #ffe5cc; }
+
+  /* =======================================================
+     RESPONSYWNOŚĆ
+     ======================================================= */
+
+  @media (min-width: 851px) {
+    body { height: 100vh; overflow: hidden; }
+    .page.active { display: flex; }
+  }
+
+  @media (max-width: 850px) {
+    body { min-height: 100vh; }
+    main { padding-bottom: 40px; }
+    
+    .dashboard-grid {
+      grid-template-columns: 1fr;
+      flex: none;
+    }
+    
+    .right-grid {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto;
+    }
+
+    .temp-tall-card {
+      flex-direction: row;
+      min-height: 160px;
+      padding: 20px;
+    }
+    .temp-section {
+      padding-top: 35px;
+    }
+    .temp-section.outside {
+      border-bottom: none;
+      border-right: 2px dashed var(--line);
+      padding-bottom: 0;
+      padding-right: 20px;
+      margin-bottom: 0;
+      margin-right: 20px;
+    }
+    .temp-tall-card .icon-large {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+    }
+    
+    .dash-card {
+      min-height: 140px;
+    }
+  }
+
+  @media (orientation: landscape) and (max-height: 600px) {
+    .topbar { padding-top: 8px; padding-bottom: 8px; }
+    .greeting-container { margin-bottom: 10px; }
+    .greeting { font-size: 20px; }
+    .temp-value { font-size: 36px; }
+    .dash-card { padding: 15px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===================== NAGŁÓWEK ===================== -->
+<header class="topbar">
+  <a href="#home" class="logo">
+    BEE<span>NEST</span>
+  </a>
+  <div class="datetime" id="datetime">--</div>
+</header>
+<div class="divider"></div>
+
+<main>
+
+  <!-- ===================== STRONA GŁÓWNA ===================== -->
+  <section id="home" class="page active">
+    
+    <div class="greeting-container">
+      <div class="greeting" id="greeting-text">Dzień dobry!</div>
+    </div>
+
+    <div class="dashboard-grid">
+      
+      <!-- LEWA KOLUMNA: Temperatura -->
+      <a href="#temperatura" class="temp-tall-card">
+        <div class="icon-large">
+          <svg viewBox="0 0 24 24"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>
+        </div>
+        
+        <div class="temp-section outside">
+          <div class="temp-label">Zewnętrzna</div>
+          <div class="temp-value"><span id="dash-temp-out">--</span><span class="unit">°C</span></div>
+        </div>
+        
+        <div class="temp-section inside">
+          <div class="temp-label">Wewnętrzna</div>
+          <div class="temp-value"><span id="dash-temp-in">--</span><span class="unit">°C</span></div>
+        </div>
+      </a>
+
+      <!-- PRAWA KOLUMNA: Siatka 2x2 -->
+      <div class="right-grid">
+        
+        <!-- Samopoczucie -->
+        <a href="#samopoczucie" class="dash-card">
+          <div class="card-header">
+            <span>Samopoczucie</span>
+            <div class="ico">
+              <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            </div>
+          </div>
+          <div class="card-status highlight" id="dash-wellbeing">Dobre</div>
+        </a>
+
+        <!-- Dokarmiaczka -->
+        <a href="#dokarmiaczka" class="dash-card">
+          <div class="card-header">
+            <span>Stan<br>Dokarmiaczki</span>
+            <div class="ico">
+              <svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+            </div>
+          </div>
+          <div class="card-status" id="dash-feeder">-- %</div>
+        </a>
+
+        <!-- Monitoring -->
+        <a href="#monitoring" class="dash-card monitoring">
+          <div>
+            Monitoring <span class="arrow">→</span>
+          </div>
+        </a>
+
+        <!-- Ustawienia -->
+        <a href="#ustawienia" class="dash-card settings">
+          <div class="ico" style="background:transparent; color:var(--muted)">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </div>
+          Ustawienia
+        </a>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== PODSTRONY ===================== -->
+  <section id="monitoring" class="page">
+    <a href="#home" class="back-btn">← Wróć do panelu</a>
+    <h1>Monitoring</h1>
+    <p class="lead">Podgląd na żywo z kamery wewnątrz ula.</p>
+    <div class="camera" id="camera">Oczekiwanie na strumień wideo…</div>
+    <div class="stats">
+      <div class="stat"><div class="label">Status kamery</div><div class="value small"><span class="pill" id="m-status">Offline</span></div></div>
+      <div class="stat"><div class="label">Ostatnia klatka</div><div class="value small"><span id="m-updated">--</span></div></div>
+      <div class="stat"><div class="label">Jakość sygnału</div><div class="value"><span id="m-signal">--</span><span class="unit">%</span></div></div>
+    </div>
+  </section>
+
+  <section id="temperatura" class="page">
+    <a href="#home" class="back-btn">← Wróć do panelu</a>
+    <h1>Temperatura</h1>
+    <p class="lead">Warunki panujące wewnątrz ula.</p>
+    <div class="stats">
+      <div class="stat primary"><div class="label">W ulu</div><div class="value"><span id="temp-current">--</span><span class="unit">°C</span></div></div>
+      <div class="stat"><div class="label">Na zewnątrz</div><div class="value"><span id="temp-outside">--</span><span class="unit">°C</span></div></div>
+      <div class="stat"><div class="label">Wilgotność</div><div class="value"><span id="temp-humidity">--</span><span class="unit">%</span></div></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="label">Minimum (24 h)</div><div class="value"><span id="temp-min">--</span><span class="unit">°C</span></div></div>
+      <div class="stat"><div class="label">Maksimum (24 h)</div><div class="value"><span id="temp-max">--</span><span class="unit">°C</span></div></div>
+    </div>
+  </section>
+
+  <section id="samopoczucie" class="page">
+    <a href="#home" class="back-btn">← Wróć do panelu</a>
+    <h1>Samopoczucie pszczół</h1>
+    <p class="lead">Aktywność, dźwięk i ogólna kondycja rodziny.</p>
+    <div class="stats">
+      <div class="stat primary"><div class="label">Stan rodziny</div><div class="value small"><span id="w-status">--</span></div></div>
+      <div class="stat"><div class="label">Aktywność</div><div class="value"><span id="w-activity">--</span><span class="unit">%</span></div></div>
+      <div class="stat"><div class="label">Natężenie dźwięku</div><div class="value"><span id="w-sound">--</span><span class="unit">dB</span></div></div>
+    </div>
+    <div class="panel">
+      <div class="row"><span>Masa ula</span><strong><span id="w-weight">--</span> kg</strong></div>
+      <div class="row" style="margin-top:6px;color:var(--muted);font-size:13px"><span>Ostatni pomiar</span><strong id="w-updated">--</strong></div>
+    </div>
+  </section>
+
+  <section id="dokarmiaczka" class="page">
+    <a href="#home" class="back-btn">← Wróć do panelu</a>
+    <h1>Stan dokarmiaczki</h1>
+    <p class="lead">Poziom pokarmu oraz historia uzupełnień.</p>
+    <div class="stats">
+      <div class="stat primary"><div class="label">Poziom pokarmu</div><div class="value"><span id="f-level">--</span><span class="unit">%</span></div></div>
+      <div class="stat"><div class="label">Masa pokarmu</div><div class="value"><span id="f-weight">--</span><span class="unit">kg</span></div></div>
+      <div class="stat"><div class="label">Ostatnie uzupełnienie</div><div class="value small"><span id="f-last">--</span></div></div>
+    </div>
+    <div class="panel">
+      <div class="row"><span>Wypełnienie zbiornika</span><strong><span id="f-level-label">--</span>%</strong></div>
+      <div class="bar"><i id="feeder-bar"></i></div>
+    </div>
+  </section>
+
+  <section id="ustawienia" class="page">
+    <a href="#home" class="back-btn">← Wróć do panelu</a>
+    <h1>Ustawienia</h1>
+    <p class="lead">Konfiguracja urządzenia i powiadomień.</p>
+    <div class="soon">
+      <div class="ico" style="width:52px;height:52px;border-radius:16px;">
+        <svg viewBox="0 0 24 24" style="width:26px;height:26px;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </div>
+      <h2>Ta sekcja jest w przygotowaniu</h2>
+      <p>Ustawienia urządzenia, progi alertów i powiadomienia pojawią się w kolejnej wersji panelu.</p>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---- 1. Zegar i Data z sekundami oraz polską nazwą miesiąca ---- */
+  const months = [
+    "stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca",
+    "lipca", "sierpnia", "września", "października", "listopada", "grudnia"
+  ];
+
+  function updateDateTime() {
+    const now = new Date();
+    const day = now.getDate();
+    const month = months[now.getMonth()];
+    const year = now.getFullYear();
+    
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    
+    document.getElementById('datetime').textContent = 
+      `dziś jest ${day} ${month} ${year}, ${hours}:${minutes}:${seconds}`;
+  }
+  updateDateTime();
+  setInterval(updateDateTime, 1000);
+
+  /* ---- 2. Inteligentne powitanie (pszczele żarty) ---- */
+  function setGreeting() {
+    const hour = new Date().getHours();
+    let text = "";
+
+    if (hour >= 5 && hour < 12) {
+      text = "Dzień dobry, ranna pszczółko!";
+    } else if (hour >= 12 && hour < 18) {
+      text = "Miłego popołudnia, pracowita pszczółko!";
+    } else if (hour >= 18 && hour < 23) {
+      text = "Dobry wieczór, wieczorna pszczółko!";
+    } else {
+      text = "Późno już, śpij słodko jak pszczółka!";
+    }
+
+    document.getElementById('greeting-text').textContent = text;
+  }
+  setGreeting();
+  setInterval(setGreeting, 60000); 
+
+  /* ---- 3. Routing (przełączanie podstron) ---- */
+  const pages = Array.from(document.querySelectorAll(".page"));
+
+  function route() {
+    const id = (location.hash || "#home").slice(1);
+    const page = document.getElementById(id) || document.getElementById("home");
+
+    pages.forEach(p => p.classList.toggle("active", p === page));
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  window.addEventListener("hashchange", route);
+  route();
+
+  /* ---- 4. API dla Pythona ---- */
+  window.BEENest = {
+    set(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    },
+    setBar(id, percent) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const v = Math.max(0, Math.min(100, Number(percent) || 0));
+      el.style.width = v + "%";
+      this.set("f-level-label", Math.round(v));
+    },
+    data(obj) {
+      if (!obj || typeof obj !== "object") return;
+      Object.keys(obj).forEach(k => {
+        const value = obj[k];
+
+        if (k === "feeder_bar") { this.setBar("feeder-bar", value); return; }
+        if (k === "f_level")    { this.set("f_level", value); this.setBar("feeder-bar", value); return; }
+        
+        if (k === "temp_current") this.set("dash-temp-in", value);
+        if (k === "temp_outside") this.set("dash-temp-out", value);
+        if (k === "w_status")     this.set("dash-wellbeing", value);
+        if (k === "f_level")      this.set("dash-feeder", value + " %");
+
+        this.set(k, value);
+      });
+    }
+  };
+
+  /* ---- 5. Automatyczne odpytywanie backendu Pythona ---- */
+  let busy = false;
+  async function poll() {
+    if (busy) return;
+    busy = true;
+    try {
+      const res = await fetch("/api/data", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        window.BEENest.data(data);
+      }
+    } catch (e) {} finally {
+      busy = false;
+    }
+  }
+  poll();
+  setInterval(poll, 5000);
+
+})();
+</script>
+</body>
+</html>
