@@ -7,7 +7,7 @@
   <title>Centrala BEENest</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body data-theme="bialy-pylek" data-contrast="high">
+<body data-theme="bialy-pylek" data-contrast="normal">
 
 <header class="topbar">
   <a href="#home" class="logo">BEE<span>NEST</span></a>
@@ -25,20 +25,36 @@
 
     <div class="dashboard-grid">
       
-      <!-- LEWA KOLUMNA: Duży panel Atmosfery -->
-      <a href="#temperatura" class="panel-card is-featured">
-        <div class="icon-large">
-          <svg viewBox="0 0 24 24"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>
-        </div>
-        <div class="temp-section">
-          <div class="temp-label">Zewnętrzna</div>
-          <div class="temp-value"><span id="dash-temp-out">--</span><span class="unit">°C</span></div>
-        </div>
-        <div class="temp-section">
-          <div class="temp-label">Wewnętrzna</div>
-          <div class="temp-value"><span id="dash-temp-in">--</span><span class="unit">°C</span></div>
-        </div>
-      </a>
+      <!-- LEWA KOLUMNA: Atmosfera (górna połowa) + Stan wylotka (dolna połowa) -->
+      <div class="left-col">
+
+        <a href="#temperatura" class="panel-card is-featured" id="dash-atmo">
+          <div class="icon-large">
+            <svg viewBox="0 0 24 24" id="dash-atmo-icon"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>
+          </div>
+          <div class="temp-section" id="dash-sec-out">
+            <div class="temp-label" id="dash-label-out">Zewnętrzna</div>
+            <div class="temp-value"><span id="dash-temp-out">--</span><span class="unit" id="dash-unit-out">°C</span></div>
+          </div>
+          <div class="temp-section" id="dash-sec-in">
+            <div class="temp-label" id="dash-label-in">Wewnętrzna</div>
+            <div class="temp-value"><span id="dash-temp-in">--</span><span class="unit" id="dash-unit-in">°C</span></div>
+          </div>
+        </a>
+
+        <!-- Wylotek (serwomechanizm otwierający / blokujący) -->
+        <a href="#wylotek" class="panel-card">
+          <div class="card-header">
+            <span>Stan<br>Wylotka</span>
+            <div class="ico"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg></div>
+          </div>
+          <div>
+            <div class="card-status" id="dash-outlet-compact">--</div>
+            <div class="card-caption" id="dash-outlet-caption">Serwomechanizm</div>
+          </div>
+        </a>
+
+      </div>
 
       <!-- PRAWA KOLUMNA: 2x2 -->
       <div class="right-grid">
@@ -49,7 +65,10 @@
             <span>Samopoczucie</span>
             <div class="ico"><svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
           </div>
-          <div class="card-status highlight" id="dash-wellbeing-compact">--</div>
+          <div>
+            <div class="card-status highlight" id="dash-wellbeing-compact">--</div>
+            <div class="card-caption" id="dash-wellbeing-caption">Stan rodziny</div>
+          </div>
         </a>
 
         <!-- Dokarmiaczka -->
@@ -58,7 +77,10 @@
             <span>Stan<br>Dokarmiaczki</span>
             <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></div>
           </div>
-          <div class="card-status" id="dash-feeder-compact">-- %</div>
+          <div>
+            <div class="card-status" id="dash-feeder-compact">-- %</div>
+            <div class="card-caption" id="dash-feeder-caption">Poziom zbiornika</div>
+          </div>
         </a>
 
         <!-- Monitoring (stały) -->
@@ -110,13 +132,16 @@
     <h1>Temperatura</h1>
     <p class="lead">Warunki panujące wewnątrz ula.</p>
     <div class="stats">
-      <div class="stat primary"><div class="label">W ulu</div><div class="value"><span id="temp-current">--</span><span class="unit">°C</span></div></div>
-      <div class="stat"><div class="label">Na zewnątrz</div><div class="value"><span id="temp-outside">--</span><span class="unit">°C</span></div></div>
+      <div class="stat primary" id="temp-tile-in"><div class="label">W ulu</div><div class="value"><span id="temp-current">--</span><span class="unit">°C</span></div></div>
+      <div class="stat" id="temp-tile-out"><div class="label">Na zewnątrz</div><div class="value"><span id="temp-outside">--</span><span class="unit">°C</span></div></div>
       <div class="stat"><div class="label">Wilgotność</div><div class="value"><span id="temp-humidity">--</span><span class="unit">%</span></div></div>
+      <div class="stat"><div class="label">Ciśnienie</div><div class="value"><span id="temp-pressure">--</span><span class="unit">hPa</span></div></div>
     </div>
     <div class="stats">
-      <div class="stat"><div class="label">Minimum (24 h)</div><div class="value"><span id="temp-min">--</span><span class="unit">°C</span></div></div>
-      <div class="stat"><div class="label">Maksimum (24 h)</div><div class="value"><span id="temp-max">--</span><span class="unit">°C</span></div></div>
+      <div class="stat"><div class="label">W ulu · minimum (24 h)</div><div class="value"><span id="temp-min">--</span><span class="unit">°C</span></div></div>
+      <div class="stat"><div class="label">W ulu · maksimum (24 h)</div><div class="value"><span id="temp-max">--</span><span class="unit">°C</span></div></div>
+      <div class="stat"><div class="label">Na zewnątrz · min. (24 h)</div><div class="value"><span id="temp-outside-min">--</span><span class="unit">°C</span></div></div>
+      <div class="stat"><div class="label">Na zewnątrz · maks. (24 h)</div><div class="value"><span id="temp-outside-max">--</span><span class="unit">°C</span></div></div>
     </div>
   </section>
 
@@ -127,7 +152,7 @@
     <p class="lead">Stan rodziny, częstotliwości i natężenie dźwięku.</p>
     <div class="stats">
       <div class="stat primary"><div class="label">Stan rodziny</div><div class="value small"><span id="w-status">--</span></div></div>
-      <div class="stat"><div class="label">Częstotliwości dominujące</div><div class="value"><span id="w_frequency">--</span><span class="unit">Hz</span></div></div>
+      <div class="stat"><div class="label">Częstotliwości dominujące</div><div class="value"><span id="w-frequency">--</span><span class="unit">Hz</span></div></div>
       <div class="stat"><div class="label">Natężenie dźwięku</div><div class="value"><span id="w-sound">--</span><span class="unit">dB</span></div></div>
     </div>
     <div class="panel">
@@ -148,6 +173,21 @@
     <div class="panel">
       <div class="row"><span>Wypełnienie zbiornika</span><strong><span id="f-level-label">--</span>%</strong></div>
       <div class="bar"><i id="feeder-bar"></i></div>
+    </div>
+  </section>
+
+  <!-- ============ WYLOTEK ============ -->
+  <section id="wylotek" class="page">
+    <a href="#home" class="back-btn">← Wróć do panelu</a>
+    <h1>Stan wylotka</h1>
+    <p class="lead">Serwomechanizm otwierający lub blokujący wylotek ula.</p>
+    <div class="stats">
+      <div class="stat primary"><div class="label">Wylotek</div><div class="value small"><span id="o-status">--</span></div></div>
+      <div class="stat"><div class="label">Pozycja serwomechanizmu</div><div class="value"><span id="o-position">--</span><span class="unit">%</span></div></div>
+    </div>
+    <div class="panel">
+      <div class="row"><span>Otwarcie wylotka</span><strong><span id="o-position-label">--</span>%</strong></div>
+      <div class="bar"><i id="outlet-bar"></i></div>
     </div>
   </section>
 
@@ -188,7 +228,7 @@
               </div>
               <div class="setting-control">
                 <label class="toggle-switch">
-                  <input type="checkbox" id="contrast-toggle" checked>
+                  <input type="checkbox" id="contrast-toggle">
                   <span class="slider"></span>
                 </label>
               </div>
@@ -331,9 +371,9 @@
           <div class="setting-group">
             <div class="setting-group-title">Zasilanie</div>
             <div class="setting-row" style="border:none;">
-              <div class="setting-control" style="display:flex; gap:10px; width:100%;">
-                <button class="back-btn" style="margin:0; flex:1; text-align:center; justify-content:center;">Uruchom Ponownie</button>
-                <button class="back-btn" style="margin:0; flex:1; text-align:center; justify-content:center; background:#FFEAEA; color:#D32F2F;">Wyłącz</button>
+              <div class="setting-control btn-row">
+                <button type="button" class="back-btn btn-wide" id="btn-reboot">Uruchom Ponownie</button>
+                <button type="button" class="back-btn btn-wide btn-danger" id="btn-shutdown">Wyłącz</button>
               </div>
             </div>
           </div>
@@ -358,7 +398,7 @@
             </div>
             <div class="setting-row" style="border:none; margin-top:10px;">
               <div class="setting-control" style="width:100%;">
-                <button class="back-btn" style="margin:0; width:100%; text-align:center; background:var(--orange); color:white;">Sprawdź aktualizacje i wykonaj</button>
+                <button type="button" class="back-btn btn-wide btn-primary" id="btn-update">Sprawdź aktualizacje i wykonaj</button>
               </div>
             </div>
           </div>
@@ -369,6 +409,12 @@
   </section>
 
 </main>
+
+<!-- Komunikat (alarm napełnienia, wyniki przycisków w ustawieniach) -->
+<div class="popup" id="popup" role="alert" hidden>
+  <span id="popup-text"></span>
+  <button type="button" class="popup-close" id="popup-close" aria-label="Zamknij">✕</button>
+</div>
 
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

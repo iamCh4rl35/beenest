@@ -2,6 +2,7 @@
    BEENest — style.css
    ===================================================== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }   /* bez tego atrybut hidden przegrywa z display:flex */
 
 :root {
   --orange: #FF8A00;
@@ -69,6 +70,7 @@ body[data-contrast="high"][data-theme="bialy-pylek"] {
 body[data-contrast="high"][data-theme="nocna-czern"] {
   --orange: #FFFFFF; --orange-dark: #FFFFFF;
   --orange-soft: #333333; --muted: #CCCCCC;
+  --knob-on: #000000;   /* tło włączonego przełącznika jest tu białe, więc kulka musi być czarna */
 }
 body[data-contrast="high"][data-theme="lekki-miodek"] {
   --bg: #FFF2E0; --black: #1A1A1A;
@@ -105,6 +107,8 @@ main { flex: 1; width: 100%; max-width: 1600px; margin: 0 auto; padding: clamp(1
 /* ---------- DASHBOARD ---------- */
 .dashboard-grid { flex: 1; display: grid; grid-template-columns: 1fr 2.2fr; gap: 20px; min-height: 0; }
 .right-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 20px; height: 100%; }
+/* Lewa kolumna: atmosfera (górna połowa) i stan wylotka (dolna połowa) */
+.left-col { display: grid; grid-template-rows: 1fr 1fr; gap: 20px; min-height: 0; }
 
 /* Wspólny styl dla dynamicznych paneli */
 .panel-card {
@@ -122,15 +126,20 @@ main { flex: 1; width: 100%; max-width: 1600px; margin: 0 auto; padding: clamp(1
 .panel-card:hover { transform: translateY(-2px); border-color: var(--orange); box-shadow: 0 10px 30px rgba(255,138,0,.12); }
 .panel-card:hover::before { transform: scaleY(1); }
 
-/* Duży panel (featured) */
-.panel-card.is-featured { padding: 25px 20px 25px 25px; }
-.icon-large { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: var(--orange-soft); color: var(--orange); margin-bottom: 10px; transition: background .3s; }
-.icon-large svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
-.temp-section { display: flex; flex-direction: column; justify-content: center; flex: 1; }
-.temp-section + .temp-section { border-top: 2px dashed var(--line); padding-top: 15px; margin-top: 15px; }
-.temp-label { font-size: clamp(15px,1.8vw,18px); color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px; }
-.temp-value { font-size: clamp(38px,5vw,56px); font-weight: 900; letter-spacing: -2px; line-height: 1; }
-.temp-value .unit { font-size: .4em; color: var(--muted); letter-spacing: 0; vertical-align: super; }
+/* Panel atmosfery (featured): połowa wysokości lewej kolumny, dwie wartości obok siebie */
+.panel-card.is-featured { padding: 14px 18px; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr; column-gap: 14px; }
+.panel-card.is-featured.single .temp-section { grid-column: 1 / -1; }
+.icon-large { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--orange-soft); color: var(--orange); margin-bottom: 6px; transition: background .3s; }
+.panel-card.is-featured .icon-large { grid-column: 1 / -1; }
+.icon-large svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.temp-section { display: flex; flex-direction: column; justify-content: flex-end; min-width: 0; }
+.temp-section + .temp-section { border-left: 2px dashed var(--line); padding-left: 14px; }
+.temp-label { font-size: clamp(11px,1.15vw,14px); color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 2px; line-height: 1.2; }
+.temp-value { font-size: clamp(30px,3.6vw,48px); font-weight: 900; letter-spacing: -1.5px; line-height: 1; white-space: nowrap; }
+.temp-value .unit { font-size: .4em; color: var(--muted); letter-spacing: 0; vertical-align: super; margin-left: 3px; }
+/* Niewyróżniona temperatura na panelu (ustawienie "Wyróżniona temperatura") */
+.temp-section.is-minor .temp-value { font-size: clamp(22px,2.6vw,34px); }
+.temp-section.is-minor .temp-label { font-size: clamp(10px,1vw,12px); }
 
 /* Małe panele (compact) */
 .panel-card:not(.is-featured) { padding: 20px; justify-content: space-between; }
@@ -139,6 +148,7 @@ main { flex: 1; width: 100%; max-width: 1600px; margin: 0 auto; padding: clamp(1
 .ico svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
 .card-status { font-size: clamp(24px,3vw,32px); font-weight: 900; color: var(--muted); margin-top: 15px; }
 .card-status.highlight { color: var(--orange); }
+.card-caption { margin-top: 4px; font-size: 12px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); }
 
 /* Karta Monitoring / Ustawienia (stałe) */
 .dash-card { position: relative; overflow: hidden; display: flex; flex-direction: column; background: var(--card-background); border: 4px solid var(--orange-dark); border-radius: var(--radius); box-shadow: var(--shadow); text-decoration: none; color: inherit; transition: transform .2s, border-color .2s, box-shadow .2s, background .3s; padding: 20px; }
@@ -171,6 +181,25 @@ body[data-contrast="high"] .stat.primary .label, body[data-contrast="high"] .sta
 .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .back-btn { display: inline-block; margin-bottom: 20px; padding: 8px 16px; background: var(--orange-soft); color: var(--orange-dark); text-decoration: none; border-radius: 999px; font-size: 14px; font-weight: 800; transition: background .2s; align-self: flex-start; border: none; cursor: pointer; }
 .back-btn:hover { filter: brightness(.95); }
+.back-btn:disabled { opacity: .55; cursor: progress; }
+
+/* Przyciski w ustawieniach (zasilanie, aktualizacja) */
+.btn-row { display: flex; gap: 10px; width: 100%; }
+.btn-wide { margin: 0; flex: 1; width: 100%; text-align: center; font-family: inherit; }
+.btn-danger { background: #FFEAEA; color: #D32F2F; }
+.btn-primary { background: var(--orange); color: #fff; }
+body[data-contrast="high"] .btn-primary { color: var(--bg); }   /* w Nocnej Czerni orange = biały, więc tekst musi być ciemny */
+
+/* Komunikat (alarm napełnienia, wyniki przycisków) */
+.popup {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 100;
+  display: flex; align-items: center; gap: 14px; max-width: min(92vw, 560px);
+  padding: 14px 18px; border-radius: var(--radius);
+  background: var(--black); color: var(--bg);
+  box-shadow: 0 10px 40px rgba(0,0,0,.35); font-size: 15px; font-weight: 800;
+  animation: fade .22s ease both;
+}
+.popup-close { border: none; background: transparent; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 4px; font-family: inherit; }
 
 /* ---------- KAMERA + DOCK iOS 27 ---------- */
 .camera { position: relative; width: 100%; aspect-ratio: 16/9; display: grid; place-items: center; margin-bottom: 14px; border-radius: 18px; border: 1px solid var(--line); background: #101012; overflow: hidden; color: #7a7a80; font-size: 13.5px; font-weight: 700; }
@@ -225,7 +254,7 @@ body[data-contrast="high"] .settings-tab.active { color: var(--bg); }
 .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: var(--line); transition: .3s; border-radius: 30px; }
 .slider:before { position: absolute; content: ""; height: 22px; width: 22px; left: 4px; bottom: 4px; background: white; transition: .3s; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,.2); }
 input:checked + .slider { background: var(--orange); }
-input:checked + .slider:before { transform: translateX(22px); }
+input:checked + .slider:before { transform: translateX(22px); background: var(--knob-on, white); }
 
 .memory-bar { width: 150px; margin-top: 0; height: 8px; }
 .memory-bar > i { width: 25%; background: var(--orange); }
@@ -233,6 +262,9 @@ input:checked + .slider:before { transform: translateX(22px); }
 /* ---------- RESPONSYWNOŚĆ ---------- */
 @media (min-width: 851px) {
   body { height: 100vh; overflow: hidden; }
+  /* Treść wyższa od okna (Monitoring, Ustawienia) przewija się wewnątrz <main>;
+     wcześniej body miało overflow:hidden i dolna część była ucięta bez możliwości przewinięcia. */
+  main { min-height: 0; overflow-y: auto; }
   .page.active { display: flex; }
 }
 @media (max-width: 850px) {
@@ -240,7 +272,8 @@ input:checked + .slider:before { transform: translateX(22px); }
   main { padding-bottom: 40px; }
   .dashboard-grid { grid-template-columns: 1fr; flex: none; }
   .right-grid { grid-template-columns: 1fr; grid-template-rows: auto; }
-  .panel-card.is-featured { min-height: 160px; padding: 20px; }
+  .left-col { grid-template-rows: auto auto; }
+  .panel-card.is-featured { min-height: 160px; padding: 16px 18px; }
   .panel-card:not(.is-featured) { min-height: 140px; }
   .settings-container { flex-direction: column; gap: 15px; }
   .settings-sidebar { width: 100%; flex-direction: row; overflow-x: auto; padding-bottom: 5px; }
