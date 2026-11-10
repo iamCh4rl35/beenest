@@ -52,8 +52,6 @@ import wellbeing_detector_driver as wellbeing
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(ROOT, "data", "beenest.db")
 DEBUG = os.environ.get("BEENEST_DEBUG") == "1"
-# Port 80 pozwala wejść na samo http://beenest.local. Jeśli jest zajęty albo brak uprawnień
-# (zwykły użytkownik na Linuksie), serwer użyje 8000. Własny port: BEENEST_PORT=8080 python3 app.py
 PORTS = (int(os.environ["BEENEST_PORT"]),) if os.environ.get("BEENEST_PORT") else ((8000,) if DEBUG else (80, 8000))
 PORT = PORTS[0]             # po starcie: port, na którym serwer naprawdę działa
 MDNS_NAME = "beenest"       # adres w sieci lokalnej: http://beenest.local
@@ -63,8 +61,10 @@ CAMERA_OFFLINE_AFTER = 10   # s    – brak klatki dłużej niż tyle = kamera o
 REFILL_JUMP = 10            # pkt% – o tyle musi wzrosnąć poziom, by uznać napełnienie
 REFILL_COOLDOWN = 60        # s    – kolejne napełnienie liczymy najwcześniej po tylu sekundach
 
-# Progi oceny "Stan rodziny" – WARTOŚCI ORIENTACYJNE, skalibruj na własnym ulu.
-WELLBEING_OK_HZ = (180, 350)
+# Progi oceny "Stan rodziny" 
+WELLBEING_OK_HZ = (80, 185)
+WELLBEING_SENSITIVE_HZ = (185, 250)
+WELLBEING_UPLIFTET_HZ = (250, 300)
 WELLBEING_MAX_DB = 70
 
 # Wylotek: pozycja serwa w %. Poniżej/powyżej progów = zablokowany/otwarty, pomiędzy = w ruchu.
@@ -78,11 +78,11 @@ HISTORY_KEYS = ("temp_current", "temp_outside", "temp_humidity", "temp_pressure"
                 "w_frequency", "w_sound")
 FEEDER_HISTORY_KEYS = ("f_level", "f_weight")
 
-# Ustawienia z panelu, które dotyczą Raspberry (reszta – wygląd, alarm – żyje w przeglądarce).
+# Ustawienia z panelu, które dotyczą Raspberry (reszta – wygląd, alarm – zapisane w przeglądarce).
 # klucz: (wartość domyślna, dozwolone wartości; None = tak/nie)
 SERVER_SETTINGS = {
-    "saveInterval":  ("60", {"1", "5", "10", "30", "60", "180"}),   # minuty
-    "dataRetention": ("12", {"1", "3", "6", "12", "24"}),           # miesiące
+    "saveInterval":  ("60", {"1", "5", "10", "30", "60", "180"}),   # częstotliwość zapisu - minuty
+    "dataRetention": ("12", {"1", "3", "6", "12", "24"}),           # przetrzymywanie danych - miesiące
     "feederRate":    (True, None),
 }
 
@@ -124,6 +124,7 @@ def to_number(v):
 # -------------------------------------------------------------
 #  Baza (SQLite): ustawienia serwera + historia
 # -------------------------------------------------------------
+
 @contextlib.contextmanager
 def db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
