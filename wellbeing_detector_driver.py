@@ -16,6 +16,6 @@ def read() -> dict:
     """
     # TODO: tu wstaw prawdziwy odczyt (mikrofon + FFT).
     return {
-        "w_frequency": 250 + random.uniform(-5, 5),
+        "w_frequency": 100 + random.uniform(-5, 5),
         "w_sound":     41 + random.uniform(-1, 1),
     }

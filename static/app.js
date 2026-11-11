@@ -78,6 +78,7 @@
   function applySettingsToUI() {
     applyTheme();
     Object.keys(SELECTS).forEach(id => { if ($(id)) $(id).value = settings[SELECTS[id]]; });
+    syncDropdowns();
     Object.keys(TOGGLES).forEach(id => { if ($(id)) $(id).checked = settings[TOGGLES[id]]; });
   }
 
@@ -127,13 +128,155 @@
   /* ===== 2. ZAKŁADKI USTAWIEŃ ===== */
   document.querySelectorAll('.settings-tab').forEach(tab => {
     tab.addEventListener('click', () => {
-      document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.settings-tab').forEach(t => {
+        t.classList.remove('active');
+        t.setAttribute('aria-selected', 'false');
+      });
       tab.classList.add('active');
+      tab.setAttribute('aria-selected', 'true');
       document.querySelectorAll('.settings-panel').forEach(p => p.classList.remove('active'));
       const target = $(tab.getAttribute('data-target'));
       if (target) target.classList.add('active');
     });
   });
+
+  /* ===== 2a. DOCK (przełącznik kamer i kategorie ustawień): płynny wskaźnik aktywnej pozycji ===== */
+  // Wygląd i czas animacji: style.css -> .dock-indicator oraz --anim-duration / --anim-ease na górze pliku.
+  function initDock(dock) {
+    const ind = document.createElement('span');
+    ind.className = 'dock-indicator';
+    dock.prepend(ind);
+
+    function place(animate) {
+      const active = dock.querySelector('.camera-dock-btn.active');
+      if (!active || !active.offsetWidth) return;            // dock jest ukryty (inna podstrona)
+      if (!animate) ind.classList.add('no-anim');
+      ind.style.setProperty('--ind-x', active.offsetLeft + 'px');
+      ind.style.setProperty('--ind-w', active.offsetWidth + 'px');
+      if (!animate) { void ind.offsetWidth; ind.classList.remove('no-anim'); }   // przeładuj układ, potem włącz animacje
+    }
+    // Zmiana klasy 'active' (kliknięcie) = animowany ruch; zmiana rozmiaru / pokazanie podstrony = skok bez animacji.
+    new MutationObserver(muts => { if (muts.some(m => m.target !== ind)) place(true); })
+      .observe(dock, { subtree: true, attributes: true, attributeFilter: ['class'] });
+    if (window.ResizeObserver) new ResizeObserver(() => place(false)).observe(dock);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => place(false));
+    place(false);
+
+    // Strzałki lewo/prawo przełączają pozycje także z klawiatury.
+    dock.addEventListener('keydown', e => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const btns = [...dock.querySelectorAll('.camera-dock-btn')];
+      const next = btns[(btns.indexOf(document.activeElement) + (e.key === 'ArrowRight' ? 1 : -1) + btns.length) % btns.length];
+      if (next) { next.focus(); next.click(); e.preventDefault(); }
+    });
+  }
+  document.querySelectorAll('.camera-dock').forEach(initDock);
+
+  /* ===== 2b. WŁASNE LISTY ROZWIJANE (zamiast <select> renderowanego przez przeglądarkę) ===== */
+  // Prawdziwy <select> zostaje w stronie (ukryty) jako źródło wartości, więc reszta kodu działa bez zmian.
+  const dropdowns = [];
+  let openMenu = null;           // { menu, trigger }
+
+  function syncDropdowns() {
+    dropdowns.forEach(d => {
+      const opt = d.select.options[d.select.selectedIndex];
+      d.label.textContent = opt ? opt.textContent : '';
+    });
+  }
+
+  function closeDropdown(refocus) {
+    if (!openMenu) return;
+    const { menu, trigger } = openMenu;
+    openMenu = null;
+    trigger.setAttribute('aria-expanded', 'false');
+    menu.classList.remove('open');
+    setTimeout(() => menu.remove(), 600);                // po zakończeniu animacji zamykania
+    if (refocus) trigger.focus();
+  }
+
+  function openDropdown(d) {
+    closeDropdown();
+    const menu = document.createElement('div');
+    menu.className = 'dd-menu';
+    menu.setAttribute('role', 'listbox');
+    [...d.select.options].forEach(o => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'dd-option';
+      b.setAttribute('role', 'option');
+      b.setAttribute('aria-selected', o.value === d.select.value ? 'true' : 'false');
+      b.dataset.value = o.value;
+      b.textContent = o.textContent;
+      b.addEventListener('click', () => {
+        if (d.select.value !== o.value) {
+          d.select.value = o.value;
+          d.select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        closeDropdown(true);
+      });
+      menu.appendChild(b);
+    });
+    document.body.appendChild(menu);
+
+    // Pozycja: pod przyciskiem, wyrównana do jego prawej krawędzi; gdy brak miejsca – nad nim.
+    const r = d.trigger.getBoundingClientRect();
+    menu.style.minWidth = r.width + 'px';
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    const up = r.bottom + 8 + mh > window.innerHeight - 8 && r.top - 8 - mh > 8;
+    menu.classList.toggle('up', up);
+    menu.style.left = Math.max(8, Math.min(r.right - mw, window.innerWidth - mw - 8)) + 'px';
+    menu.style.top = (up ? r.top - 8 - mh : r.bottom + 8) + 'px';
+
+    d.trigger.setAttribute('aria-expanded', 'true');
+    openMenu = { menu, trigger: d.trigger };
+    requestAnimationFrame(() => menu.classList.add('open'));
+    const sel = menu.querySelector('[aria-selected="true"]') || menu.firstChild;
+    if (sel) sel.focus({ preventScroll: true });
+  }
+
+  document.querySelectorAll('.setting-control select').forEach(select => {
+    const wrap = document.createElement('div');
+    wrap.className = 'dd';
+    select.parentNode.insertBefore(wrap, select);
+    wrap.appendChild(select);
+    select.classList.add('dd-native');
+    select.tabIndex = -1;
+    select.setAttribute('aria-hidden', 'true');
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'dd-trigger';
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    const rowLabel = select.closest('.setting-row') && select.closest('.setting-row').querySelector('.setting-label');
+    if (rowLabel) trigger.setAttribute('aria-label', rowLabel.textContent.trim());
+    trigger.innerHTML = '<span class="dd-label"></span><svg class="dd-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>';
+    wrap.appendChild(trigger);
+
+    const d = { select, trigger, label: trigger.querySelector('.dd-label') };
+    dropdowns.push(d);
+    trigger.addEventListener('click', () => (openMenu && openMenu.trigger === trigger) ? closeDropdown(true) : openDropdown(d));
+    select.addEventListener('change', syncDropdowns);   // także gdy wartość zmieni ktoś inny niż lista
+  });
+  syncDropdowns();
+
+  document.addEventListener('pointerdown', e => {
+    if (openMenu && !openMenu.menu.contains(e.target) && !openMenu.trigger.contains(e.target)) closeDropdown();
+  });
+  document.addEventListener('keydown', e => {
+    if (!openMenu) return;
+    const items = [...openMenu.menu.querySelectorAll('.dd-option')];
+    const i = items.indexOf(document.activeElement);
+    if (e.key === 'Escape') { closeDropdown(true); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { items[(i + 1) % items.length].focus(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { items[(i - 1 + items.length) % items.length].focus(); e.preventDefault(); }
+    else if (e.key === 'Home') { items[0].focus(); e.preventDefault(); }
+    else if (e.key === 'End') { items[items.length - 1].focus(); e.preventDefault(); }
+    else if (e.key === 'Tab') closeDropdown();
+  });
+  window.addEventListener('resize', () => closeDropdown());
+  window.addEventListener('hashchange', () => closeDropdown());
+  document.addEventListener('scroll', e => { if (openMenu && !openMenu.menu.contains(e.target)) closeDropdown(); }, true);
 
   /* ===== 3. ZEGAR ===== */
   const months = ["stycznia","lutego","marca","kwietnia","maja","czerwca","lipca","sierpnia","września","października","listopada","grudnia"];
@@ -183,15 +326,68 @@
     }
     settings.camera = cam;
     saveSettings();
-    document.querySelectorAll('.camera-dock-btn').forEach(btn => {
+    document.querySelectorAll('.camera-dock-btn[data-camera]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.camera === cam);
     });
     render();
+    syncStream();
     poll();
   }
-  document.querySelectorAll('.camera-dock-btn').forEach(btn => {
+  document.querySelectorAll('.camera-dock-btn[data-camera]').forEach(btn => {
     btn.addEventListener('click', () => applyCamera(btn.dataset.camera));
   });
+
+  /* ===== 6b. PODGLĄD NA ŻYWO ===== */
+  // Obraz (<img>) istnieje tylko wtedy, gdy ktoś ogląda podstronę Monitoring na widocznej karcie.
+  // Po wyjściu <img> znika, przeglądarka zrywa połączenie, a serwer wyłącza kamerę.
+  let streamCam = null, streamImg = null, streamTimer = null, streamLive = false, stalledPolls = 0;
+  const WAITING_TEXT = 'Oczekiwanie na strumień wideo…';
+
+  function stopStream() {
+    clearTimeout(streamTimer);
+    streamCam = null;
+    streamLive = false;
+    if (streamImg) {                       // samo usunięcie <img> z strony NIE przerywa pobierania – trzeba wyzerować src
+      streamImg.onload = streamImg.onerror = null;
+      streamImg.src = '';
+      streamImg = null;
+    }
+    if ($('camera')) $('camera').textContent = WAITING_TEXT;
+  }
+
+  function startStream(cam) {
+    const box = $('camera');
+    stopStream();                          // domknij poprzedni strumień, zanim otworzysz nowy
+    streamCam = cam;
+    stalledPolls = 0;
+    box.textContent = 'Łączę z kamerą…';
+    const img = streamImg = new Image();
+    img.alt = 'Podgląd z kamery: ' + CAMERA_NAMES[cam];
+    img.onload = () => { streamLive = true; };
+    img.onerror = () => {                                         // np. kamera niepodłączona
+      if (streamCam !== cam) return;
+      streamLive = false;
+      box.textContent = 'Kamera niedostępna – próbuję ponownie…';
+      streamTimer = setTimeout(() => { if (streamCam === cam) startStream(cam); }, 3000);
+    };
+    img.src = '/api/camera/' + encodeURIComponent(cam) + '/stream?t=' + Date.now();
+    box.appendChild(img);
+  }
+
+  function syncStream() {
+    const want = $('camera') && !document.hidden && location.hash === '#monitoring' ? settings.camera : null;
+    if (want === streamCam) return;
+    if (want) startStream(want); else stopStream();
+  }
+  window.addEventListener('hashchange', syncStream);
+  document.addEventListener('visibilitychange', syncStream);
+
+  // Zawieszony strumień (serwer przestał dostawać klatki): dwa odczyty "Offline" z rzędu = start od nowa.
+  function watchStream(data) {
+    if (!streamLive || streamCam !== settings.camera) { stalledPolls = 0; return; }
+    stalledPolls = data.m_status === 'Offline' ? stalledPolls + 1 : 0;
+    if (stalledPolls >= 2) startStream(streamCam);
+  }
 
   /* ===== 7. KOMUNIKAT (popup) I DŹWIĘK ===== */
   let popupTimer = null, beepTimer = null, audioCtx = null;
@@ -234,6 +430,96 @@
     if (withSound) { beep(); beepTimer = setInterval(beep, 2000); }
   }
   if ($('popup-close')) $('popup-close').addEventListener('click', closePopup);
+
+  /* ===== 7b. OKNA DIALOGOWE (zamiast confirm() przeglądarki) ===== */
+  // askModal({icon, title, text, option:{label,hint,checked}, buttons:[{label,value,kind}], danger}) -> Promise<{value, checked}>
+  // Okno zostaje otwarte po odpowiedzi: wołający pokazuje kolejny stan (modalBusy / noticeDialog) albo woła modalClose().
+  const MODAL_ICONS = {
+    update: '<path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>',
+    power: '<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>',
+    alert: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
+    check: '<path d="M20 6L9 17l-5-5"/>'
+  };
+  const modal = { resolve: null, busy: false, lastFocus: null };
+  const pageParts = () => document.querySelectorAll('header.topbar, .divider, main');
+
+  function modalRender(o) {
+    modal.busy = !!o.busy;
+    $('modal-icon').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' + (MODAL_ICONS[o.icon] || MODAL_ICONS.alert) + '</svg>';
+    $('modal-title').textContent = o.title || '';
+    $('modal-text').textContent = o.text || '';
+    $('modal-text').hidden = !o.text;
+    $('modal-option').hidden = !o.option;
+    if (o.option) {
+      $('modal-option-label').textContent = o.option.label;
+      $('modal-option-hint').textContent = o.option.hint || '';
+      $('modal-option-check').checked = !!o.option.checked;
+    }
+    $('modal-spinner').hidden = !o.busy;
+    $('modal-card').classList.toggle('is-danger', !!o.danger);
+    const box = $('modal-actions');
+    box.textContent = '';
+    (o.buttons || []).forEach(b => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'modal-btn ' + (b.kind || 'ghost');
+      btn.textContent = b.label;
+      btn.dataset.value = b.value;
+      btn.addEventListener('click', () => modalAnswer(b.value));
+      box.appendChild(btn);
+    });
+    box.hidden = !(o.buttons && o.buttons.length);
+    if (!$('modal').classList.contains('open')) {
+      modal.lastFocus = document.activeElement;
+      pageParts().forEach(el => { el.inert = true; });      // fokus i czytniki ekranu zostają w oknie
+      $('modal').classList.add('open');
+    }
+    const first = box.querySelector('.modal-btn.primary, .modal-btn.danger') || box.querySelector('.modal-btn');
+    if (first) first.focus({ preventScroll: true });
+  }
+
+  function modalAnswer(value) {
+    const r = modal.resolve;
+    modal.resolve = null;
+    if (r) r({ value, checked: $('modal-option-check').checked });
+  }
+
+  function modalClose() {
+    modal.resolve = null;
+    modal.busy = false;
+    $('modal').classList.remove('open');
+    pageParts().forEach(el => { el.inert = false; });
+    if (modal.lastFocus && modal.lastFocus.focus) modal.lastFocus.focus({ preventScroll: true });
+  }
+
+  function askModal(o) {
+    return new Promise(resolve => { modal.resolve = resolve; modalRender(o); });
+  }
+
+  // Pytanie z przyciskami Anuluj / OK. Anulowanie zamyka okno i zwraca null; potwierdzenie zostawia je otwarte.
+  async function confirmDialog(o) {
+    const r = await askModal(o);
+    if (r.value !== 'ok') { modalClose(); return null; }
+    return r;
+  }
+  async function noticeDialog(o) {
+    await askModal({ ...o, buttons: [{ label: 'OK', value: 'ok', kind: o.danger ? 'danger' : 'primary' }] });
+    modalClose();
+  }
+  const modalBusy = (icon, title, text) => modalRender({ icon, title, text, busy: true, buttons: [] });
+
+  $('modal-backdrop').addEventListener('click', () => { if (modal.resolve) modalAnswer('cancel'); });
+  document.addEventListener('keydown', e => {
+    if (!$('modal').classList.contains('open')) return;
+    if (e.key === 'Escape') { if (modal.resolve) modalAnswer('cancel'); e.preventDefault(); }
+    else if (e.key === 'Tab') {                              // fokus krąży tylko po przyciskach okna
+      const f = [...$('modal-card').querySelectorAll('button, input')].filter(x => x.offsetParent !== null || x.type === 'checkbox');
+      if (!f.length) { e.preventDefault(); return; }
+      const i = f.indexOf(document.activeElement);
+      const next = f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length];
+      next.focus(); e.preventDefault();
+    }
+  });
 
   /* ===== 8. ALARM NAPEŁNIENIA DOKARMIACZKI ===== */
   // Serwer sam wykrywa napełnienie i podaje jego czas (f_last). Alarm dzwoni, gdy ten czas
@@ -297,6 +583,8 @@
   // i "Zakres wyróżnionej temperatury".
   function renderAtmo() {
     const mode = ATMO_ICONS[settings.atmoData] ? settings.atmoData : 'temperatura';
+    // Ustawienia dotyczące tylko temperatury chowamy, gdy panel pokazuje ciśnienie albo wilgoć.
+    document.querySelectorAll('.temp-only').forEach(el => { el.hidden = mode !== 'temperatura'; });
     if ($('dash-atmo-icon')) $('dash-atmo-icon').innerHTML = ATMO_ICONS[mode];
     if (!$('dash-sec-in') || !$('dash-sec-out')) return;
 
@@ -305,10 +593,10 @@
       const range = TEMP_KEYS.in[settings.tempRange] ? settings.tempRange : 'obecna';
       ['out', 'in'].forEach(loc => {
         const isMain = loc === main;
-        const key = TEMP_KEYS[loc][isMain ? range : 'obecna'];
+        const key = TEMP_KEYS[loc][range];   // zakres (obecna / min / maks 24 h) dotyczy obu wartości
         $('dash-temp-' + loc).textContent = format(key, state[key]);
         $('dash-unit-' + loc).textContent = '°C';
-        $('dash-label-' + loc).textContent = LOC_LABEL[loc] + (isMain ? RANGE_LABEL[range] : '');
+        $('dash-label-' + loc).textContent = LOC_LABEL[loc] + RANGE_LABEL[range];
         $('dash-sec-' + loc).classList.toggle('is-minor', !isMain);
       });
       $('dash-sec-in').hidden = false;
@@ -425,7 +713,7 @@
       const res = await fetch("/api/data?camera=" + encodeURIComponent(cam), { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
-        if (cam === settings.camera) window.BEENest.data(data);   // kamerę zmieniono w trakcie – zignoruj
+        if (cam === settings.camera) { window.BEENest.data(data); watchStream(data); }   // kamerę zmieniono w trakcie – zignoruj
       }
     } catch (e) { } finally {
       busy = false;
@@ -447,23 +735,48 @@
   }
 
   bindAction('btn-reboot', async () => {
-    if (!confirm('Uruchomić urządzenie ponownie?')) return;
+    const ok = await confirmDialog({
+      icon: 'power', title: 'Uruchomić ponownie?',
+      text: 'Ul na około minutę przestanie odpowiadać. Strona wróci sama.',
+      buttons: [{ label: 'Anuluj', value: 'cancel' }, { label: 'Uruchom ponownie', value: 'ok', kind: 'primary' }]
+    });
+    if (!ok) return;
+    modalClose();
     await postJSON('/api/system/reboot');
     showPopup('Restartuję… Strona wróci za około minutę.', 60000, false);
   });
 
   bindAction('btn-shutdown', async () => {
-    if (!confirm('Wyłączyć urządzenie?\nŻeby je znów włączyć, trzeba odłączyć i podłączyć zasilanie.')) return;
+    const ok = await confirmDialog({
+      icon: 'power', danger: true, title: 'Wyłączyć urządzenie?',
+      text: 'Żeby je znów włączyć, trzeba odłączyć i podłączyć zasilanie.',
+      buttons: [{ label: 'Anuluj', value: 'cancel' }, { label: 'Wyłącz', value: 'ok', kind: 'danger' }]
+    });
+    if (!ok) return;
+    modalClose();
     await postJSON('/api/system/shutdown');
     showPopup('Wyłączam urządzenie…', 60000, false);
   });
 
+  // Aktualizacja NIE restartuje ula sama: restart tylko po zaznaczeniu opcji w oknie.
   bindAction('btn-update', async () => {
-    if (!confirm('Sprawdzić aktualizacje?\nJeśli są nowe, urządzenie pobierze je i uruchomi się ponownie.')) return;
-    showPopup('Sprawdzam aktualizacje…', 120000, false);
-    const r = await postJSON('/api/system/update');
-    if (r.updated) showPopup('Pobrano aktualizację. Restartuję urządzenie…', 60000, false);
-    else showPopup('Masz najnowszą wersję.', 5000, false);
+    const r = await confirmDialog({
+      icon: 'update', title: 'Sprawdzić aktualizacje?',
+      text: 'Pobiorę nowe wersje z repozytorium, jeśli są dostępne.',
+      option: { label: 'Uruchom ponownie po sprawdzeniu', hint: 'Restart nastąpi tylko wtedy, gdy zostaną pobrane zmiany.', checked: false },
+      buttons: [{ label: 'Anuluj', value: 'cancel' }, { label: 'Sprawdź i zaktualizuj', value: 'ok', kind: 'primary' }]
+    });
+    if (!r) return;
+    modalBusy('update', 'Sprawdzam aktualizacje…', 'To może potrwać chwilę.');
+    let res;
+    try { res = await postJSON('/api/system/update', { reboot: r.checked }); }
+    catch (e) {
+      await noticeDialog({ icon: 'alert', danger: true, title: 'Aktualizacja nie powiodła się', text: e.message });
+      return;
+    }
+    if (!res.updated) await noticeDialog({ icon: 'check', title: 'Masz najnowszą wersję', text: 'Nie ma nic do pobrania.' });
+    else if (res.rebooting) await noticeDialog({ icon: 'power', title: 'Zaktualizowano', text: 'Urządzenie uruchamia się ponownie. Strona wróci za około minutę.' });
+    else await noticeDialog({ icon: 'check', title: 'Zaktualizowano', text: 'Nowa wersja jest pobrana. Pliki .py i main.html zadziałają po ponownym uruchomieniu aplikacji lub urządzenia, a style i skrypty strony po jej odświeżeniu.' });
   });
 
   /* ===== 13. INIT ===== */

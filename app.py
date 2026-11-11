@@ -37,14 +37,16 @@ import threading
 import time
 
 import flask.cli
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.serving import WSGIRequestHandler
+from werkzeug.wsgi import ClosingIterator
 
 import atmosphere_detector_driver as atmosphere
 import camera_detector_driver as camera
 import feeder_detector_driver as feeder
 import outlet_detector_driver as outlet
 import wellbeing_detector_driver as wellbeing
+import buzzer_driver as buzzer
 
 # -------------------------------------------------------------
 #  Konfiguracja
@@ -228,14 +230,17 @@ def day_range(key, current, now):
 
 
 def wellbeing_status(frequency, sound):
-    if frequency is None and sound is None:
+    if frequency is None or sound is None:
         return "Brak danych"
-    lo, hi = WELLBEING_OK_HZ
-    if frequency is not None and not lo <= frequency <= hi:
-        return "Niespokojne"
+    if frequency is not None and frequency <= WELLBEING_OK_HZ[1]:
+            return "Dobre"
+    if frequency is not None and WELLBEING_SENSITIVE_HZ[0] > frequency <= WELLBEING_SENSITIVE_HZ[1]:
+            return "Niespokojne"
+    if frequency is not None and WELLBEING_UPLIFTET_HZ[0] > frequency:
+            return "Wściekłe"
     if sound is not None and sound > WELLBEING_MAX_DB:
         return "Niespokojne"
-    return "Dobre"
+    return "Brak danych"
 
 
 def outlet_status(position):
@@ -266,7 +271,13 @@ def detect_refill(level, now):
         if now - _state["last_refill"] >= REFILL_COOLDOWN:
             _state["last_refill"] = now
             kv_set("f_last", int(now))
-
+            threading.Thread(target=ring_buzzer, daemon=True).start()
+            
+def ring_buzzer():
+    try:
+        buzzer.alarm()
+    except Exception as e:
+        log(f"buzzer: {e}")
 
 def save_history(raw, settings, now):
     """Zapis do historii co 'Interwał zapisu danych' + usuwanie starszych niż 'Długość przetrzymywania'."""
@@ -511,6 +522,31 @@ def api_data():
     return jsonify({**get_latest(), **camera_info(cam), **disk_info()})
 
 
+@app.route("/api/camera/<name>/stream")
+def camera_stream(name):
+    """Podgląd na żywo (MJPEG) – <img src="/api/camera/external/stream">. Kamera działa, dopóki ktoś ogląda."""
+    if name not in camera.CAMERAS:
+        return jsonify(error="Nieznana kamera"), 404
+    try:
+        stream = camera.frames(name)
+        track("camera-" + name)
+    except Exception as e:
+        track("camera-" + name, e)
+        return jsonify(error=error_text(e)), 503
+
+    def multipart():
+        for jpeg in stream:
+            yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                   + str(len(jpeg)).encode() + b"\r\n\r\n" + jpeg + b"\r\n")
+
+    # ClosingIterator woła stream.close() także wtedy, gdy przeglądarka zerwie połączenie
+    # – dzięki temu kamera na pewno zostaje zwolniona.
+    resp = Response(ClosingIterator(multipart(), stream.close),
+                    mimetype="multipart/x-mixed-replace; boundary=frame")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/api/settings", methods=["GET", "POST"])
 def api_settings():
     if request.method == "POST":
@@ -547,9 +583,14 @@ def api_shutdown():
 
 @app.post("/api/system/update")
 def api_update():
-    """git pull; jeśli przyszły zmiany -> restart (tak jak ręczne 'git pull && reboot now')."""
+    """
+    git pull. Ul NIE restartuje się sam: restart tylko gdy żądanie ma {"reboot": true}
+    (okienko "Uruchom ponownie po sprawdzeniu") i faktycznie przyszły zmiany.
+    Odpowiedź: {updated: bool, rebooting: bool}
+    """
     if (bad := json_only()):
         return bad
+    reboot = (request.get_json(silent=True) or {}).get("reboot") is True
     try:
         before = run_system_command(["git", "rev-parse", "HEAD"]).stdout.strip()
         run_system_command(["git", "pull", "--ff-only"], timeout=120)
@@ -557,13 +598,16 @@ def api_update():
     except Exception as e:
         return jsonify(error=error_text(e)), 500
     if before == after:
-        return jsonify(updated=False)
+        return jsonify(updated=False, rebooting=False)
+    if not reboot:
+        return jsonify(updated=True, rebooting=False)
     try:
         power("reboot")
     except Exception as e:
         return jsonify(updated=True, error="Pobrano aktualizację, ale restart się nie udał: "
                        + error_text(e)), 500
-    return jsonify(updated=True)
+    return jsonify(updated=True, rebooting=True)
+
 
 
 # -------------------------------------------------------------
