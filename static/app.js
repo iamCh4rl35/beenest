@@ -151,8 +151,10 @@
       const active = dock.querySelector('.camera-dock-btn.active');
       if (!active || !active.offsetWidth) return;            // dock jest ukryty (inna podstrona)
       if (!animate) ind.classList.add('no-anim');
-      ind.style.setProperty('--ind-x', active.offsetLeft + 'px');
+      ind.style.setProperty('--ind-x', active.offsetLeft + 'px');     // działa i poziomo, i w pionowym docku
+      ind.style.setProperty('--ind-y', active.offsetTop + 'px');
       ind.style.setProperty('--ind-w', active.offsetWidth + 'px');
+      ind.style.setProperty('--ind-h', active.offsetHeight + 'px');
       if (!animate) { void ind.offsetWidth; ind.classList.remove('no-anim'); }   // przeładuj układ, potem włącz animacje
     }
     // Zmiana klasy 'active' (kliknięcie) = animowany ruch; zmiana rozmiaru / pokazanie podstrony = skok bez animacji.
@@ -162,11 +164,12 @@
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => place(false));
     place(false);
 
-    // Strzałki lewo/prawo przełączają pozycje także z klawiatury.
+    // Strzałki (lewo/prawo w poziomym, góra/dół w pionowym) przełączają pozycje także z klawiatury.
     dock.addEventListener('keydown', e => {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const fwd = e.key === 'ArrowRight' || e.key === 'ArrowDown', back = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
+      if (!fwd && !back) return;
       const btns = [...dock.querySelectorAll('.camera-dock-btn')];
-      const next = btns[(btns.indexOf(document.activeElement) + (e.key === 'ArrowRight' ? 1 : -1) + btns.length) % btns.length];
+      const next = btns[(btns.indexOf(document.activeElement) + (fwd ? 1 : -1) + btns.length) % btns.length];
       if (next) { next.focus(); next.click(); e.preventDefault(); }
     });
   }
@@ -388,6 +391,80 @@
     stalledPolls = data.m_status === 'Offline' ? stalledPolls + 1 : 0;
     if (stalledPolls >= 2) startStream(streamCam);
   }
+
+  /* ===== 6c. POWIĘKSZANIE PODGLĄDU KAMERY NA CAŁY EKRAN ===== */
+  // Płynność i krzywa: --anim-duration / --anim-ease (style.css, :root). Mały podgląd rośnie do pełnego ekranu (technika FLIP),
+  // dock jedzie z środka paska w lewy róg, w prawym rogu pojawia się przycisk zamknięcia. Zamknięcie: przycisk X, Esc.
+  (function initCameraZoom() {
+    const page = $('monitoring'), cam = $('camera'), dock = $('camera-dock'), closeBtn = $('cam-close');
+    if (!page || !cam || !closeBtn) return;
+    const slot = cam.parentElement;
+    let isMax = false, timer = null;
+
+    const animMs = () => {
+      const v = getComputedStyle(document.documentElement).getPropertyValue('--anim-duration').trim();
+      return (/ms$/.test(v) ? parseFloat(v) : parseFloat(v) * 1000) || 400;
+    };
+    const setBox = (r) => Object.assign(cam.style, {
+      top: r.top + 'px', left: r.left + 'px', width: r.width + 'px', height: r.height + 'px', right: 'auto', bottom: 'auto'
+    });
+    // FLIP: zmierz element, zmień układ, odwróć różnicę transformacją i pozwól jej płynnie zejść do zera
+    function flip(el, mutate) {
+      const a = el.getBoundingClientRect();
+      mutate();
+      const b = el.getBoundingClientRect();
+      el.style.transition = 'none';
+      el.style.transform = 'translate(' + (a.left - b.left) + 'px,' + (a.top - b.top) + 'px)';
+      void el.offsetWidth;
+      el.style.transition = '';
+      el.style.transform = '';
+    }
+    function cleanup() {
+      cam.classList.remove('is-max', 'closing');
+      cam.removeAttribute('style');
+    }
+    function open() {
+      if (isMax) return;
+      isMax = true; clearTimeout(timer);
+      setBox(cam.getBoundingClientRect());
+      cam.classList.remove('closing');
+      flip(dock, () => { cam.classList.add('is-max'); page.classList.add('cam-max'); });
+      void cam.offsetWidth;
+      Object.assign(cam.style, { top: '0px', left: '0px', width: '100%', height: '100%' });
+      cam.setAttribute('aria-label', 'Podgląd powiększony');
+      cam.tabIndex = -1;
+      closeBtn.focus({ preventScroll: true });
+    }
+    function close() {
+      if (!isMax) return;
+      isMax = false;
+      cam.classList.add('closing');
+      setBox(slot.getBoundingClientRect());
+      flip(dock, () => page.classList.remove('cam-max'));
+      clearTimeout(timer);
+      timer = setTimeout(cleanup, animMs() + 60);
+      cam.setAttribute('aria-label', 'Powiększ podgląd na cały ekran');
+      cam.tabIndex = 0;
+      cam.focus({ preventScroll: true });
+    }
+    // Wyjście z Monitoringu: natychmiast, bez animacji
+    function reset() {
+      if (!isMax && !cam.classList.contains('is-max')) return;
+      isMax = false; clearTimeout(timer);
+      page.classList.remove('cam-max');
+      cleanup();
+      dock.style.transform = '';
+    }
+    cam.addEventListener('click', () => { if (!isMax) open(); });
+    cam.addEventListener('keydown', e => {
+      if (!isMax && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(); }
+    });
+    closeBtn.addEventListener('click', close);
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && isMax && !document.getElementById('modal').classList.contains('open')) close();
+    });
+    window.addEventListener('hashchange', () => { if (location.hash !== '#monitoring') reset(); });
+  })();
 
   /* ===== 7. KOMUNIKAT (popup) I DŹWIĘK ===== */
   let popupTimer = null, beepTimer = null, audioCtx = null;

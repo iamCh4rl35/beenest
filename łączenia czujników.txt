@@ -1,0 +1,8 @@
+kamera zewnętrzna - CAM0
+kamera wewnętrzna - CAM!
+
+czujnik temperatury nr 1 (BME280):
+    VCC - 3v3
+    GND - GND
+    SDA - SDA1 (pin 9 lub pin 3)
+    SCL - SCL1 (pin 8 lub pin 2)
