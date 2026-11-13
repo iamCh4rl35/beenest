@@ -76,8 +76,17 @@ OUTLET_OPEN_ABOVE = 95
 SENSORS = (atmosphere, wellbeing, feeder, outlet)
 
 # Co trafia do historii. Dane dokarmiaczki tylko, gdy włączone "Zapisuj tempo rozładowania".
-HISTORY_KEYS = ("temp_current", "temp_outside", "temp_humidity", "temp_pressure",
+HISTORY_KEYS = ("temp_current", "temp_outside",
+                "temp_humidity", "temp_outside_humidity",
+                "temp_pressure", "temp_outside_pressure",
                 "w_frequency", "w_sound")
+
+# Odczyt -> przedrostek pól z minimum i maksimum z 24 h (np. "temp_humidity" -> temp_humidity_min / temp_humidity_max)
+DAY_RANGES = {
+    "temp_current": "temp", "temp_outside": "temp_outside",
+    "temp_humidity": "temp_humidity", "temp_outside_humidity": "temp_outside_humidity",
+    "temp_pressure": "temp_pressure", "temp_outside_pressure": "temp_outside_pressure",
+}
 FEEDER_HISTORY_KEYS = ("f_level", "f_weight")
 
 # Ustawienia z panelu, które dotyczą Raspberry (reszta – wygląd, alarm – zapisane w przeglądarce).
@@ -297,8 +306,8 @@ def save_history(raw, settings, now):
 
 def build_payload(raw, now):
     p = dict(raw)
-    p["temp_min"], p["temp_max"] = day_range("temp_current", raw["temp_current"], now)
-    p["temp_outside_min"], p["temp_outside_max"] = day_range("temp_outside", raw["temp_outside"], now)
+    for key, prefix in DAY_RANGES.items():
+        p[prefix + "_min"], p[prefix + "_max"] = day_range(key, raw[key], now)
     p["w_status"] = wellbeing_status(raw["w_frequency"], raw["w_sound"])
     p["o_status"] = outlet_status(raw["o_position"])
     p["w_updated"] = int(now)                 # sekundy od 1970 – przeglądarka sformatuje po swojemu

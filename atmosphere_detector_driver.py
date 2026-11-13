@@ -16,7 +16,9 @@ import bme280
 
 
 ADDRESS = 0x76   # zmień na 0x77, jeśli i2cdetect pokazał 77
-KEYS = ("temp_current", "temp_outside", "temp_humidity", "temp_pressure")
+KEYS = ("temp_current", "temp_outside",
+        "temp_humidity", "temp_outside_humidity",
+        "temp_pressure", "temp_outside_pressure")
 
 
 def read() -> dict:
@@ -26,8 +28,14 @@ def read() -> dict:
     d = bme280.sample(bus, ADDRESS, calibration)
     # TODO: tu wstaw prawdziwy odczyt (np. dwa BME280 po I2C).
     return {
+        # W ulu (pierwszy BME280, adres ADDRESS)
         "temp_current":  d.temperature,
-        "temp_outside":  12.8 + random.uniform(-0.3, 0.3),
         "temp_humidity": d.humidity,
         "temp_pressure": d.pressure,
+        # Na zewnątrz – na razie dane demonstracyjne. Gdy podepniesz drugi BME280 (adres 0x77),
+        # odczytaj go tak samo jak powyżej (bme280.sample(bus, 0x77, calibration_out)) i wpisz:
+        # temp_outside = d_out.temperature, temp_outside_humidity = d_out.humidity, temp_outside_pressure = d_out.pressure
+        "temp_outside":          12.8 + random.uniform(-0.3, 0.3),
+        "temp_outside_humidity": 78 + random.uniform(-1, 1),
+        "temp_outside_pressure": 1012 + random.uniform(-1, 1),
     }

@@ -17,6 +17,10 @@
     atmoData: 'temperatura',
     tempHighlight: 'w-ulu',
     tempRange: 'obecna',
+    humidityHighlight: 'w-ulu',
+    humidityRange: 'obecna',
+    pressureHighlight: 'w-ulu',
+    pressureRange: 'obecna',
     wellbeingData: 'stan',
     feederData: 'poziom',
     saveInterval: '60',
@@ -36,6 +40,10 @@
     'atmo-data-select': 'atmoData',
     'temp-highlight-select': 'tempHighlight',
     'temp-range-select': 'tempRange',
+    'humidity-highlight-select': 'humidityHighlight',
+    'humidity-range-select': 'humidityRange',
+    'pressure-highlight-select': 'pressureHighlight',
+    'pressure-range-select': 'pressureRange',
     'wellbeing-data-select': 'wellbeingData',
     'feeder-data-select': 'feederData',
     'save-interval-select': 'saveInterval',
@@ -616,7 +624,10 @@
   const DECIMALS = {
     temp_current: 1, temp_outside: 1, temp_min: 1, temp_max: 1,
     temp_outside_min: 1, temp_outside_max: 1,
-    temp_humidity: 0, temp_pressure: 0,
+    temp_humidity: 0, temp_humidity_min: 0, temp_humidity_max: 0,
+    temp_outside_humidity: 0, temp_outside_humidity_min: 0, temp_outside_humidity_max: 0,
+    temp_pressure: 0, temp_pressure_min: 0, temp_pressure_max: 0,
+    temp_outside_pressure: 0, temp_outside_pressure_min: 0, temp_outside_pressure_max: 0,
     w_frequency: 0, w_sound: 0,
     f_level: 0, f_weight: 1,
     o_position: 0,
@@ -649,44 +660,74 @@
     wilgoc: '<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>',
     cisnienie: '<circle cx="12" cy="12" r="9"/><path d="M12 12l3.5-3.5"/><path d="M12 3v2M3 12h2M21 12h-2"/>'
   };
-  const TEMP_KEYS = {
-    in:  { 'obecna': 'temp_current', 'min-24h': 'temp_min',         'max-24h': 'temp_max' },
-    out: { 'obecna': 'temp_outside', 'min-24h': 'temp_outside_min', 'max-24h': 'temp_outside_max' }
+  // Każdy parametr atmosfery: jednostka, nazwy ustawień (wyróżniona wartość, zakres) i klucze z serwera.
+  // Dla każdego jest to samo: dwie wartości (w ulu / na zewnątrz), jedna wyróżniona, zakres dotyczy obu.
+  const ATMO = {
+    temperatura: {
+      name: 'Temperatura', unit: '°C', hl: 'tempHighlight', rg: 'tempRange',
+      keys: {
+        in:  { 'obecna': 'temp_current', 'min-24h': 'temp_min',         'max-24h': 'temp_max' },
+        out: { 'obecna': 'temp_outside', 'min-24h': 'temp_outside_min', 'max-24h': 'temp_outside_max' }
+      }
+    },
+    wilgoc: {
+      name: 'Wilgotność', unit: '%', hl: 'humidityHighlight', rg: 'humidityRange',
+      keys: {
+        in:  { 'obecna': 'temp_humidity',         'min-24h': 'temp_humidity_min',         'max-24h': 'temp_humidity_max' },
+        out: { 'obecna': 'temp_outside_humidity', 'min-24h': 'temp_outside_humidity_min', 'max-24h': 'temp_outside_humidity_max' }
+      }
+    },
+    cisnienie: {
+      name: 'Ciśnienie', unit: 'hPa', hl: 'pressureHighlight', rg: 'pressureRange',
+      keys: {
+        in:  { 'obecna': 'temp_pressure',         'min-24h': 'temp_pressure_min',         'max-24h': 'temp_pressure_max' },
+        out: { 'obecna': 'temp_outside_pressure', 'min-24h': 'temp_outside_pressure_min', 'max-24h': 'temp_outside_pressure_max' }
+      }
+    }
   };
   const RANGE_LABEL = { 'obecna': '', 'min-24h': ' · min. 24 h', 'max-24h': ' · maks. 24 h' };
   const LOC_LABEL = { in: 'Wewnętrzna', out: 'Zewnętrzna' };
 
-  // Duży panel atmosfery: ustawienia "Dane panelu atmosfery", "Wyróżniona temperatura"
-  // i "Zakres wyróżnionej temperatury".
+  // Które wartości (w ulu / na zewnątrz) i jaki zakres wybrano dla danego parametru
+  function atmoChoice(mode) {
+    const a = ATMO[mode];
+    return {
+      main: settings[a.hl] === 'na-zewnatrz' ? 'out' : 'in',
+      range: a.keys.in[settings[a.rg]] ? settings[a.rg] : 'obecna'
+    };
+  }
+
+  // Duży panel atmosfery w Menu Głównym: ustawienia "Dane panelu atmosfery" oraz, dla wybranego parametru,
+  // "Wyróżniona …" i "Zakres wyróżnionej …".
   function renderAtmo() {
-    const mode = ATMO_ICONS[settings.atmoData] ? settings.atmoData : 'temperatura';
-    // Ustawienia dotyczące tylko temperatury chowamy, gdy panel pokazuje ciśnienie albo wilgoć.
-    document.querySelectorAll('.temp-only').forEach(el => { el.hidden = mode !== 'temperatura'; });
+    const mode = ATMO[settings.atmoData] ? settings.atmoData : 'temperatura';
+    const a = ATMO[mode];
+    // W ustawieniach widać tylko wiersze wybranego parametru.
+    document.querySelectorAll('[data-atmo-mode]').forEach(el => { el.hidden = el.dataset.atmoMode !== mode; });
     if ($('dash-atmo-icon')) $('dash-atmo-icon').innerHTML = ATMO_ICONS[mode];
     if (!$('dash-sec-in') || !$('dash-sec-out')) return;
 
-    if (mode === 'temperatura') {
-      const main = settings.tempHighlight === 'na-zewnatrz' ? 'out' : 'in';
-      const range = TEMP_KEYS.in[settings.tempRange] ? settings.tempRange : 'obecna';
-      ['out', 'in'].forEach(loc => {
-        const isMain = loc === main;
-        const key = TEMP_KEYS[loc][range];   // zakres (obecna / min / maks 24 h) dotyczy obu wartości
-        $('dash-temp-' + loc).textContent = format(key, state[key]);
-        $('dash-unit-' + loc).textContent = '°C';
-        $('dash-label-' + loc).textContent = LOC_LABEL[loc] + RANGE_LABEL[range];
-        $('dash-sec-' + loc).classList.toggle('is-minor', !isMain);
+    const { main, range } = atmoChoice(mode);
+    $('dash-atmo').classList.toggle('is-long', mode === 'cisnienie');   // 4 cyfry + hPa: mniejsza czcionka
+    ['out', 'in'].forEach(loc => {
+      const key = a.keys[loc][range];   // zakres (obecna / min / maks 24 h) dotyczy obu wartości
+      $('dash-temp-' + loc).textContent = format(key, state[key]);
+      $('dash-unit-' + loc).textContent = a.unit;
+      // Parametr rozpoznajemy po ikonie karty i jednostce (°C / % / hPa), więc etykieta jest krótka.
+      $('dash-label-' + loc).textContent = LOC_LABEL[loc] + RANGE_LABEL[range];
+      $('dash-sec-' + loc).classList.toggle('is-minor', loc !== main);
+    });
+  }
+
+  // Strona Atmosfera: wyróżniamy kafelek wybrany w ustawieniach dla każdego parametru.
+  function renderAtmoPage() {
+    Object.keys(ATMO).forEach(mode => {
+      const main = atmoChoice(mode).main;
+      ['in', 'out'].forEach(loc => {
+        const el = $('atmo-cell-' + mode + '-' + loc);
+        if (el) el.classList.toggle('primary', loc === main);
       });
-      $('dash-sec-in').hidden = false;
-      $('dash-atmo').classList.remove('single');
-    } else {
-      const one = mode === 'wilgoc' ? ['Wilgotność', 'temp_humidity', '%'] : ['Ciśnienie', 'temp_pressure', 'hPa'];
-      $('dash-label-out').textContent = one[0];
-      $('dash-temp-out').textContent = format(one[1], state[one[1]]);
-      $('dash-unit-out').textContent = one[2];
-      $('dash-sec-out').classList.remove('is-minor');
-      $('dash-sec-in').hidden = true;
-      $('dash-atmo').classList.add('single');
-    }
+    });
   }
 
   // Kafelek "Stan wylotka": status z serwera + pozycja serwa.
@@ -749,11 +790,8 @@
       $('memory-bar-fill').style.width = Math.round((total - free) / total * 100) + '%';   // pasek = zajęte
     }
 
-    const main = settings.tempHighlight === 'na-zewnatrz' ? 'out' : 'in';
-    if ($('temp-tile-in')) $('temp-tile-in').classList.toggle('primary', main === 'in');
-    if ($('temp-tile-out')) $('temp-tile-out').classList.toggle('primary', main === 'out');
-
     renderAtmo();
+    renderAtmoPage();
     renderWellbeing();
     renderFeeder();
     renderOutlet();

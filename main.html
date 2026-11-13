@@ -180,42 +180,38 @@
     <!-- ============ TEMPERATURA ============ -->
     <section id="temperatura" class="page">
       <a href="#home" class="back-btn">← Wróć do panelu</a>
-      <h1>Temperatura</h1>
-      <p class="lead">Warunki panujące wewnątrz ula.</p>
-      <div class="stats">
-        <div class="stat primary" id="temp-tile-in">
-          <div class="label">W ulu</div>
+      <h1>Atmosfera</h1>
+      <p class="lead">Temperatura, wilgotność i ciśnienie w ulu i na zewnątrz oraz minimum i maksimum z ostatnich 24 godzin.</p>
+      <div class="atmo-table">
+        <div class="atmo-head"></div>
+        <div class="atmo-head">W ulu</div>
+        <div class="atmo-head">Na zewnątrz</div>
+        <div class="atmo-param">Temperatura</div>
+        <div class="stat atmo-cell" id="atmo-cell-temperatura-in">
           <div class="value"><span id="temp-current">--</span><span class="unit">°C</span></div>
+          <div class="atmo-range">min <span id="temp-min">--</span> · maks <span id="temp-max">--</span> <span class="unit-s">°C</span></div>
         </div>
-        <div class="stat" id="temp-tile-out">
-          <div class="label">Na zewnątrz</div>
+        <div class="stat atmo-cell" id="atmo-cell-temperatura-out">
           <div class="value"><span id="temp-outside">--</span><span class="unit">°C</span></div>
+          <div class="atmo-range">min <span id="temp-outside-min">--</span> · maks <span id="temp-outside-max">--</span> <span class="unit-s">°C</span></div>
         </div>
-        <div class="stat">
-          <div class="label">Wilgotność</div>
+        <div class="atmo-param">Wilgotność</div>
+        <div class="stat atmo-cell" id="atmo-cell-wilgoc-in">
           <div class="value"><span id="temp-humidity">--</span><span class="unit">%</span></div>
+          <div class="atmo-range">min <span id="temp-humidity-min">--</span> · maks <span id="temp-humidity-max">--</span> <span class="unit-s">%</span></div>
         </div>
-        <div class="stat">
-          <div class="label">Ciśnienie</div>
+        <div class="stat atmo-cell" id="atmo-cell-wilgoc-out">
+          <div class="value"><span id="temp-outside-humidity">--</span><span class="unit">%</span></div>
+          <div class="atmo-range">min <span id="temp-outside-humidity-min">--</span> · maks <span id="temp-outside-humidity-max">--</span> <span class="unit-s">%</span></div>
+        </div>
+        <div class="atmo-param">Ciśnienie</div>
+        <div class="stat atmo-cell" id="atmo-cell-cisnienie-in">
           <div class="value"><span id="temp-pressure">--</span><span class="unit">hPa</span></div>
+          <div class="atmo-range">min <span id="temp-pressure-min">--</span> · maks <span id="temp-pressure-max">--</span> <span class="unit-s">hPa</span></div>
         </div>
-      </div>
-      <div class="stats">
-        <div class="stat">
-          <div class="label">W ulu · minimum (24 h)</div>
-          <div class="value"><span id="temp-min">--</span><span class="unit">°C</span></div>
-        </div>
-        <div class="stat">
-          <div class="label">W ulu · maksimum (24 h)</div>
-          <div class="value"><span id="temp-max">--</span><span class="unit">°C</span></div>
-        </div>
-        <div class="stat">
-          <div class="label">Na zewnątrz · min. (24 h)</div>
-          <div class="value"><span id="temp-outside-min">--</span><span class="unit">°C</span></div>
-        </div>
-        <div class="stat">
-          <div class="label">Na zewnątrz · maks. (24 h)</div>
-          <div class="value"><span id="temp-outside-max">--</span><span class="unit">°C</span></div>
+        <div class="stat atmo-cell" id="atmo-cell-cisnienie-out">
+          <div class="value"><span id="temp-outside-pressure">--</span><span class="unit">hPa</span></div>
+          <div class="atmo-range">min <span id="temp-outside-pressure-min">--</span> · maks <span id="temp-outside-pressure-max">--</span> <span class="unit-s">hPa</span></div>
         </div>
       </div>
     </section>
@@ -362,7 +358,7 @@
                   </select>
                 </div>
               </div>
-              <div class="setting-row temp-only">
+              <div class="setting-row" data-atmo-mode="temperatura">
                 <div>
                   <div class="setting-label">Wyróżniona temperatura</div>
                   <div class="setting-desc">Wartość pogrubiona na karcie temperatury.</div>
@@ -374,13 +370,63 @@
                   </select>
                 </div>
               </div>
-                 <div class="setting-row temp-only">
+              <div class="setting-row" data-atmo-mode="temperatura">
                 <div>
                   <div class="setting-label">Zakres wyróżnionej temperatury</div>
                   <div class="setting-desc">Jaki typ odczytu ma być wyświetlany jako główny.</div>
                 </div>
                 <div class="setting-control">
                   <select id="temp-range-select">
+                    <option value="obecna">Obecna</option>
+                    <option value="min-24h">Min. z 24h</option>
+                    <option value="max-24h">Maks. z 24h</option>
+                  </select>
+                </div>
+              </div>
+              <div class="setting-row" data-atmo-mode="wilgoc">
+                <div>
+                  <div class="setting-label">Wyróżniona wilgotność</div>
+                  <div class="setting-desc">Wartość pogrubiona na karcie wilgotności.</div>
+                </div>
+                <div class="setting-control">
+                  <select id="humidity-highlight-select">
+                    <option value="w-ulu">W ulu</option>
+                    <option value="na-zewnatrz">Na zewnątrz</option>
+                  </select>
+                </div>
+              </div>
+              <div class="setting-row" data-atmo-mode="wilgoc">
+                <div>
+                  <div class="setting-label">Zakres wyróżnionej wilgotności</div>
+                  <div class="setting-desc">Jaki typ odczytu ma być wyświetlany jako główny.</div>
+                </div>
+                <div class="setting-control">
+                  <select id="humidity-range-select">
+                    <option value="obecna">Obecna</option>
+                    <option value="min-24h">Min. z 24h</option>
+                    <option value="max-24h">Maks. z 24h</option>
+                  </select>
+                </div>
+              </div>
+              <div class="setting-row" data-atmo-mode="cisnienie">
+                <div>
+                  <div class="setting-label">Wyróżnione ciśnienie</div>
+                  <div class="setting-desc">Wartość pogrubiona na karcie ciśnienia.</div>
+                </div>
+                <div class="setting-control">
+                  <select id="pressure-highlight-select">
+                    <option value="w-ulu">W ulu</option>
+                    <option value="na-zewnatrz">Na zewnątrz</option>
+                  </select>
+                </div>
+              </div>
+              <div class="setting-row" data-atmo-mode="cisnienie">
+                <div>
+                  <div class="setting-label">Zakres wyróżnionego ciśnienia</div>
+                  <div class="setting-desc">Jaki typ odczytu ma być wyświetlany jako główny.</div>
+                </div>
+                <div class="setting-control">
+                  <select id="pressure-range-select">
                     <option value="obecna">Obecna</option>
                     <option value="min-24h">Min. z 24h</option>
                     <option value="max-24h">Maks. z 24h</option>
