@@ -1,5 +1,5 @@
 kamera zewnętrzna - CAM0
-kamera wewnętrzna - CAM!
+kamera wewnętrzna - CAM1
 
 czujnik temperatury nr 1 (BME280):
     VCC - 3v3
