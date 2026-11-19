@@ -6,6 +6,85 @@
 
   const $ = id => document.getElementById(id);
 
+  /* ===== 0. NIESPAROWANE URZĄDZENIE: tylko ekran parowania ===== */
+  // Stan zabezpieczeń wkleja serwer (app.py -> security_state). Bez parowania reszta API odpowiada 401.
+  const AUTH = window.BEENEST_AUTH || { poziom: 'admin', wyswietlacz: true, bez_zabezpieczen: true };
+  if (AUTH.poziom === 'niesparowane') { showPairScreen(); return; }
+
+  function guessDeviceName() {
+    const ua = navigator.userAgent;
+    if (/iPhone/.test(ua)) return 'iPhone';
+    if (/iPad/.test(ua)) return 'iPad';
+    if (/Android/.test(ua)) return /Mobile/.test(ua) ? 'Telefon z Androidem' : 'Tablet z Androidem';
+    if (/Windows/.test(ua)) return 'Komputer z Windows';
+    if (/Macintosh/.test(ua)) return 'Komputer Mac';
+    if (/Linux/.test(ua)) return 'Komputer z Linuksem';
+    return 'Telefon';
+  }
+
+  function showPairScreen() {
+    const s = (window.BEENEST_DEVICE || {}).settings || {};
+    document.body.setAttribute('data-theme', s.theme || 'bialy-pylek');
+    document.body.setAttribute('data-contrast', s.highContrast ? 'high' : 'normal');
+    document.querySelectorAll('header.topbar, .divider, main').forEach(el => { el.hidden = true; });
+    $('pair-screen').hidden = false;
+
+    // Kod QR z wyświetlacza otwiera adres .../#paruj=<kod> – wtedy nie trzeba przepisywać cyfr.
+    const m = /paruj=([\w-]+)/.exec(location.hash);
+    let token = m ? m[1] : null;
+    const useDigits = () => {
+      token = null;
+      $('pair-code-field').hidden = false;
+      $('pair-lead').textContent = 'Na wyświetlaczu ula otwórz Ustawienia → Działanie → Sparuj urządzenie i wpisz tu 6 cyfr.';
+    };
+    if (token) {
+      $('pair-code-field').hidden = true;
+      $('pair-lead').textContent = 'Kod z wyświetlacza jest już wczytany. Podaj nazwę tego urządzenia i naciśnij Sparuj.';
+    }
+    $('pair-name').value = guessDeviceName();
+
+    const fail = text => {
+      $('pair-wait').hidden = true;
+      $('pair-form').hidden = false;
+      $('pair-submit').disabled = false;
+      $('pair-error').textContent = text;
+    };
+    function waitForDecision() {
+      $('pair-form').hidden = true;
+      $('pair-wait').hidden = false;
+      const timer = setInterval(async () => {
+        let st;
+        try { st = await (await fetch('/api/parowanie/status', { cache: 'no-store' })).json(); } catch (e) { return; }
+        if (st.stan === 'czeka') return;
+        clearInterval(timer);
+        if (st.stan === 'przyjete') { location.replace(location.pathname); return; }
+        useDigits();
+        fail(st.stan === 'odrzucone' ? 'Wyświetlacz ula odrzucił to urządzenie.'
+          : 'Minął czas na zatwierdzenie. Wygeneruj nowy kod na wyświetlaczu ula.');
+      }, 1500);
+    }
+
+    $('pair-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      $('pair-error').textContent = '';
+      const body = { nazwa: $('pair-name').value.trim() };
+      if (token) body.token = token;
+      else {
+        body.kod = $('pair-code').value.replace(/\D/g, '');
+        if (body.kod.length !== 6) { $('pair-error').textContent = 'Wpisz 6 cyfr z wyświetlacza ula.'; return; }
+      }
+      $('pair-submit').disabled = true;
+      try { await postJSON('/api/parowanie/zglos', body); }
+      catch (err) {
+        if (token) useDigits();                     // kod z QR wygasł – zostaje wpisanie cyfr
+        const left = err.data && err.data.pozostalo;
+        fail(err.message + (left ? '. Pozostało prób: ' + left + '.' : ''));
+        return;
+      }
+      waitForDecision();
+    });
+  }
+
   // Ostatnie dane z serwera. Wyświetlanie (render) zawsze rysuje się z tego + z ustawień,
   // więc zmiana ustawienia działa od razu, bez czekania na kolejne odpytanie.
   const state = {};
@@ -30,9 +109,9 @@
     camera: 'external'
   };
 
-  // Te trzy dotyczą zapisu danych na Raspberry, więc są trzymane na serwerze (wspólne dla
-  // wszystkich telefonów). Reszta (wygląd, alarm, kamera) jest osobno w każdej przeglądarce.
-  const SERVER_KEYS = ['saveInterval', 'dataRetention', 'feederRate'];
+  // Wszystkie ustawienia są na Raspberry w data/global.conf: [zapis] wspólne dla wszystkich,
+  // reszta (wygląd, karty, alarm, kamera) osobno dla każdego urządzenia (po adresie IP).
+  // Serwer wkleja je do strony (window.BEENEST_DEVICE), więc są od razu, bez czekania.
 
   // id elementu w main.html -> nazwa ustawienia
   const SELECTS = {
@@ -55,28 +134,8 @@
     'feeder-alarm-toggle': 'feederAlarm'
   };
 
-  const SETTINGS_VERSION = 2;
-
-  function readStored() {
-    try {
-      const v = JSON.parse(localStorage.getItem('beenest-settings'));
-      if (!v || typeof v !== 'object') return {};
-      // Wersja 1 zapisywała też wartości domyślne, a domyślny kontrast zmienił się na wyłączony.
-      // Stary zapis "highContrast" nie jest więc świadomym wyborem – pomijamy go (raz).
-      if (v._v !== SETTINGS_VERSION) delete v.highContrast;
-      delete v._v;
-      return v;
-    } catch (e) { return {}; }   // pusty / uszkodzony wpis albo zablokowany localStorage
-  }
-  const settings = Object.assign({}, defaultSettings, readStored());
-
-  // Zapisujemy tylko to, co różni się od domyślnych – dzięki temu zmiana wartości domyślnych
-  // w nowej wersji strony dociera do urządzeń, które niczego świadomie nie zmieniały.
-  function saveSettings() {
-    const changed = { _v: SETTINGS_VERSION };
-    Object.keys(settings).forEach(k => { if (settings[k] !== defaultSettings[k]) changed[k] = settings[k]; });
-    try { localStorage.setItem('beenest-settings', JSON.stringify(changed)); } catch (e) { }
-  }
+  const device = window.BEENEST_DEVICE || { settings: {}, known: true };
+  const settings = Object.assign({}, defaultSettings, device.settings);
 
   function applyTheme() {
     document.body.setAttribute('data-theme', settings.theme);
@@ -96,33 +155,69 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {})
     });
+    return readJSON(res);
+  }
+
+  async function getJSON(url) {
+    return readJSON(await fetch(url, { cache: 'no-store' }));
+  }
+
+  // Błąd ma .status i .data (odpowiedź serwera). 401 = urządzenie przestało być sparowane -> ekran parowania.
+  async function readJSON(res) {
     let data = {};
     try { data = await res.json(); } catch (e) { }
-    if (!res.ok) throw new Error(data.error || ('błąd HTTP ' + res.status));
+    if (res.status === 401 && data.niesparowane && AUTH.poziom !== 'niesparowane') location.reload();
+    if (!res.ok) {
+      const err = new Error(data.error || ('błąd HTTP ' + res.status));
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
     return data;
   }
 
-  async function pullServerSettings() {
-    try {
-      const res = await fetch('/api/settings', { cache: 'no-store' });
-      if (!res.ok) return;
-      const s = await res.json();
-      SERVER_KEYS.forEach(k => { if (k in s) settings[k] = s[k]; });
-      saveSettings();
-      applySettingsToUI();
-    } catch (e) { }
+  async function pushSettings(changes) {
+    try { await postJSON('/api/settings', changes); }
+    catch (e) {
+      showPopup('Nie udało się zapisać ustawienia na urządzeniu: ' + e.message, 6000, false);
+      try {                                       // np. brak uprawnień – pokaż z powrotem to, co jest zapisane
+        Object.assign(settings, await getJSON('/api/settings'));
+        applySettingsToUI();
+        render();
+      } catch (e2) { }
+    }
   }
 
-  async function pushServerSetting(key, value) {
-    try { await postJSON('/api/settings', { [key]: value }); }
-    catch (e) { showPopup('Nie udało się zapisać ustawienia na urządzeniu: ' + e.message, 6000, false); }
+  // Jednorazowo: starsze wersje trzymały ustawienia w przeglądarce. Nowe urządzenie (bez sekcji
+  // w global.conf) przenosi je na Raspberry; potem wpis w przeglądarce jest usuwany.
+  function migrateBrowserSettings() {
+    let old = null;
+    try { old = JSON.parse(localStorage.getItem('beenest-settings')); } catch (e) { }
+    try { localStorage.removeItem('beenest-settings'); } catch (e) { }
+    if (device.known || !old || typeof old !== 'object') return;
+    if (old._v !== 2) delete old.highContrast;   // wersja 1 zapisywała dawny domyślny kontrast – to nie był wybór
+    const changes = {};
+    const valid = (k, v) => {                     // tylko wartości, które strona zna (lista w <select> / tak-nie / kamera)
+      const id = Object.keys(SELECTS).find(i => SELECTS[i] === k);
+      if (id) return !!$(id) && [...$(id).options].some(o => o.value === v);
+      if (k === 'camera') return v === 'external' || v === 'internal';
+      return typeof v === 'boolean';
+    };
+    Object.keys(defaultSettings).forEach(k => {
+      if (k in old && !['saveInterval', 'dataRetention', 'feederRate'].includes(k) && valid(k, old[k])) changes[k] = old[k];
+    });
+    if (!Object.keys(changes).length) return;
+    postJSON('/api/settings', changes).then(s => {
+      Object.keys(defaultSettings).forEach(k => { if (k in s) settings[k] = s[k]; });
+      applySettingsToUI();
+      applyCamera(settings.camera);
+    }).catch(() => { });
   }
 
   function onSettingChange(key, value) {
     settings[key] = value;
-    saveSettings();
     if (key === 'theme' || key === 'highContrast') applyTheme();
-    if (SERVER_KEYS.includes(key)) pushServerSetting(key, value);
+    pushSettings({ [key]: value });
     render();
   }
 
@@ -330,13 +425,13 @@
 
   /* ===== 6. KAMERA (dock) ===== */
   const CAMERA_NAMES = { external: 'Zewnętrzna', internal: 'Wewnętrzna' };
-  function applyCamera(cam) {
+  function applyCamera(cam, persist) {
     if (!CAMERA_NAMES[cam]) cam = 'external';
     if (cam !== settings.camera) {           // dane kamery należą do poprzedniej kamery
       state.m_signal = state.m_updated = state.m_status = null;
     }
+    if (persist && cam !== settings.camera) pushSettings({ camera: cam });
     settings.camera = cam;
-    saveSettings();
     document.querySelectorAll('.camera-dock-btn[data-camera]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.camera === cam);
     });
@@ -345,7 +440,7 @@
     poll();
   }
   document.querySelectorAll('.camera-dock-btn[data-camera]').forEach(btn => {
-    btn.addEventListener('click', () => applyCamera(btn.dataset.camera));
+    btn.addEventListener('click', () => applyCamera(btn.dataset.camera, true));
   });
 
   /* ===== 6b. PODGLĄD NA ŻYWO ===== */
@@ -474,6 +569,113 @@
     window.addEventListener('hashchange', () => { if (location.hash !== '#monitoring') reset(); });
   })();
 
+  /* ===== 6d. WYKRESY (zakładki Atmosfera i Samopoczucie) ===== */
+  // Rysuje je static/chart.js (BeeChart). Zakresy i szerokość uśredniania: app.py -> CHART_RANGES.
+  // Animacje: style.css -> --chart-grow-duration, --chart-zoom-duration, --chart-ease.
+  const CHART_AVG = { '12h': '15 minut', '1d': '30 minut', '3d': 'godziny', '7d': 'dnia', '14d': 'dnia', '30d': '3 dni', '3m': 'tygodnia', '6m': '2 tygodni' };
+  const CHART_SPAN = { '12h': '12 godzin', '1d': '24 godzin', '3d': '3 dni', '7d': '7 dni', '14d': '14 dni', '30d': '30 dni', '3m': '3 miesięcy', '6m': '6 miesięcy' };
+  const chartMemory = (() => { try { return JSON.parse(localStorage.getItem('beenest-charts')) || {}; } catch (e) { return {}; } })();
+  const rememberCharts = () => { try { localStorage.setItem('beenest-charts', JSON.stringify(chartMemory)); } catch (e) { /* tryb prywatny */ } };
+  const historyCache = new Map();   // ta sama prośba w ciągu minuty nie idzie drugi raz do Raspberry
+
+  // "co 1 minutę", "co 2 minuty", "co 60 minut"
+  const minutesText = n => n === 1 ? '1 minutę'
+    : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) ? n + ' minuty' : n + ' minut';
+  async function fetchHistory(keys, range, fresh) {
+    const id = keys.join(',') + '|' + range, hit = historyCache.get(id);
+    if (!fresh && hit && Date.now() - hit.at < 60000) return hit.data;
+    const r = await fetch('/api/history?keys=' + encodeURIComponent(keys.join(',')) + '&range=' + range, { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    historyCache.set(id, { at: Date.now(), data });
+    return data;
+  }
+
+  // cfg: { id, page, host, rangeDock, paramDock?, params: { nazwa: { keys, labels, unit, decimals } }, onParam? }
+  function initChartPanel(cfg) {
+    if (!window.BeeChart || !cfg.host) return null;
+    const mem = chartMemory[cfg.id] || (chartMemory[cfg.id] = {});
+    let range = CHART_AVG[mem.range] ? mem.range : '1d';
+    let param = cfg.params[mem.param] ? mem.param : Object.keys(cfg.params)[0];
+    const chart = new BeeChart(cfg.host);
+    let seq = 0;
+
+    const mark = (dock, attr, value) => dock && dock.querySelectorAll('.camera-dock-btn').forEach(b => {
+      const on = b.dataset[attr] === value;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+
+    async function load(mode, fresh) {
+      const my = ++seq, p = cfg.params[param];
+      try {
+        const d = await fetchHistory(p.keys, range, fresh);
+        if (my !== seq) return;                     // w międzyczasie kliknięto coś innego
+        chart.show({
+          from: d.from, to: d.to, step: d.step,
+          gap: Math.max(4 * d.step, 2.5 * d.save_interval),   // przerwa w linii = brak zapisów dłużej niż tyle
+          unit: p.unit, decimals: p.decimals, bands: d.bands || null, avgLabel: CHART_AVG[range],
+          series: p.keys.map((k, i) => ({ label: p.labels[i], points: d.series[k] || [] })),
+          emptyText: 'Brak zapisanych pomiarów z ostatnich ' + CHART_SPAN[range] + '. Pomiary zapisują się co '
+            + minutesText(Math.round(d.save_interval / 60)) + ' (Ustawienia → Działanie).'
+        }, mode);
+      } catch (e) {
+        if (my === seq) chart.error('Nie udało się pobrać danych wykresu.');
+      }
+    }
+
+    function setRange(r) {
+      if (r === range || !CHART_AVG[r]) return;
+      range = mem.range = r; rememberCharts();
+      mark(cfg.rangeDock, 'range', range);
+      load('domain');
+    }
+    function setParam(name) {
+      if (name === param || !cfg.params[name]) return;
+      param = mem.param = name; rememberCharts();
+      mark(cfg.paramDock, 'param', param);
+      if (cfg.onParam) cfg.onParam(param);
+      load('morph');
+    }
+
+    cfg.rangeDock.querySelectorAll('[data-range]').forEach(b => b.addEventListener('click', () => setRange(b.dataset.range)));
+    if (cfg.paramDock) cfg.paramDock.querySelectorAll('[data-param]').forEach(b => b.addEventListener('click', () => setParam(b.dataset.param)));
+    mark(cfg.rangeDock, 'range', range);
+    mark(cfg.paramDock, 'param', param);
+    if (cfg.onParam) cfg.onParam(param);
+
+    // Wejście na zakładkę = linia wyrasta z osi X; potem co minutę ciche odświeżenie.
+    const onPage = () => location.hash === '#' + cfg.page;
+    const enter = () => { if (onPage()) load('grow', true); };
+    window.addEventListener('hashchange', enter);
+    enter();
+    setInterval(() => { if (onPage() && !document.hidden && !chart.busy()) load('quiet', true); }, 60000);
+    return { chart, setParam, setRange };
+  }
+
+  const atmoChart = initChartPanel({
+    id: 'atmo', page: 'temperatura', host: $('atmo-chart'),
+    rangeDock: $('atmo-range-dock'), paramDock: $('atmo-param-dock'),
+    params: {
+      temperatura: { keys: ['temp_current', 'temp_outside'], labels: ['W ulu', 'Na zewnątrz'], unit: '°C', decimals: 1 },
+      wilgoc:      { keys: ['temp_humidity', 'temp_outside_humidity'], labels: ['W ulu', 'Na zewnątrz'], unit: '%', decimals: 0 },
+      cisnienie:   { keys: ['temp_pressure', 'temp_outside_pressure'], labels: ['W ulu', 'Na zewnątrz'], unit: 'hPa', decimals: 1 }
+    },
+    // grupa odczytów nad wykresem podświetla się razem z wybranym parametrem
+    onParam: name => document.querySelectorAll('.atmo-group').forEach(g => g.classList.toggle('is-selected', g.dataset.param === name))
+  });
+  document.querySelectorAll('.atmo-group').forEach(g => {
+    const pick = () => { if (atmoChart) atmoChart.setParam(g.dataset.param); };
+    g.addEventListener('click', pick);
+    g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+  });
+
+  initChartPanel({
+    id: 'wellbeing', page: 'samopoczucie', host: $('wellbeing-chart'),
+    rangeDock: $('wellbeing-range-dock'),
+    params: { czestotliwosc: { keys: ['w_frequency'], labels: ['Częstotliwość'], unit: 'Hz', decimals: 0 } }
+  });
+
   /* ===== 7. KOMUNIKAT (popup) I DŹWIĘK ===== */
   let popupTimer = null, beepTimer = null, audioCtx = null;
 
@@ -523,16 +725,39 @@
     update: '<path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>',
     power: '<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>',
     alert: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
-    check: '<path d="M20 6L9 17l-5-5"/>'
+    check: '<path d="M20 6L9 17l-5-5"/>',
+    trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+    lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    usb: '<rect x="7" y="9" width="10" height="13" rx="2"/><path d="M9 9V3h6v6"/><line x1="11" y1="5.5" x2="11" y2="6.5"/><line x1="13" y1="5.5" x2="13" y2="6.5"/>',
+    wifi: '<path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>',
+    phone: '<rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>',
+    crown: '<path d="M3 17L2 7l5 4 5-7 5 7 5-4-1 10z"/><path d="M3 21h18"/>',
+    crownOff: '<path d="M3 17L2 7l5 4 5-7 5 7 5-4-1 10z"/><path d="M3 21h18"/><line x1="2" y1="2" x2="22" y2="22"/>'
   };
   const modal = { resolve: null, busy: false, lastFocus: null };
   const pageParts = () => document.querySelectorAll('header.topbar, .divider, main');
 
+  // Tekst okna: *słowo* = kursywa, \n = nowa linijka. Bez innerHTML – tekst z serwera nie wstrzyknie znaczników.
+  function setModalText(el, text) {
+    el.textContent = '';
+    text.split(/(\*[^*]+\*)/).forEach(part => {
+      if (/^\*[^*]+\*$/.test(part)) {
+        const em = document.createElement('em');
+        em.textContent = part.slice(1, -1);
+        el.appendChild(em);
+      } else if (part) el.appendChild(document.createTextNode(part));
+    });
+  }
+
   function modalRender(o) {
     modal.busy = !!o.busy;
+    $('modal-icon').hidden = o.icon === false;              // icon: false = bez ikony (okna z kodem QR)
     $('modal-icon').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' + (MODAL_ICONS[o.icon] || MODAL_ICONS.alert) + '</svg>';
+    $('modal-extra').replaceChildren(...(o.content ? [o.content] : []));   // content: własny element (kod QR, przełączniki)
+    $('modal-extra').hidden = !o.content;
+    $('modal-card').classList.toggle('is-wide', !!o.wide);
     $('modal-title').textContent = o.title || '';
-    $('modal-text').textContent = o.text || '';
+    setModalText($('modal-text'), o.text || '');
     $('modal-text').hidden = !o.text;
     $('modal-option').hidden = !o.option;
     if (o.option) {
@@ -595,7 +820,7 @@
 
   $('modal-backdrop').addEventListener('click', () => { if (modal.resolve) modalAnswer('cancel'); });
   document.addEventListener('keydown', e => {
-    if (!$('modal').classList.contains('open')) return;
+    if (!$('modal').classList.contains('open') || $('pin-modal').classList.contains('open')) return;
     if (e.key === 'Escape') { if (modal.resolve) modalAnswer('cancel'); e.preventDefault(); }
     else if (e.key === 'Tab') {                              // fokus krąży tylko po przyciskach okna
       const f = [...$('modal-card').querySelectorAll('button, input')].filter(x => x.offsetParent !== null || x.type === 'checkbox');
@@ -685,7 +910,7 @@
       }
     }
   };
-  const RANGE_LABEL = { 'obecna': '', 'min-24h': ' · min. 24 h', 'max-24h': ' · maks. 24 h' };
+  const RANGE_LABEL = { 'obecna': '', 'min-24h': ' · minimum z 24 godzin', 'max-24h': ' · maksimum z 24 godzin' };
   const LOC_LABEL = { in: 'Wewnętrzna', out: 'Zewnętrzna' };
 
   // Które wartości (w ulu / na zewnątrz) i jaki zakres wybrano dla danego parametru
@@ -826,6 +1051,7 @@
     const cam = settings.camera;
     try {
       const res = await fetch("/api/data?camera=" + encodeURIComponent(cam), { cache: "no-store" });
+      if (res.status === 401) { location.reload(); return; }     // urządzenie odłączone od ula -> ekran parowania
       if (res.ok) {
         const data = await res.json();
         if (cam === settings.camera) { window.BEENest.data(data); watchStream(data); }   // kamerę zmieniono w trakcie – zignoruj
@@ -873,29 +1099,632 @@
     showPopup('Wyłączam urządzenie…', 60000, false);
   });
 
-  // Aktualizacja NIE restartuje ula sama: restart tylko po zaznaczeniu opcji w oknie.
-  bindAction('btn-update', async () => {
-    const r = await confirmDialog({
-      icon: 'update', title: 'Sprawdzić aktualizacje?',
-      text: 'Pobiorę nowe wersje z repozytorium, jeśli są dostępne.',
-      option: { label: 'Uruchom ponownie po sprawdzeniu', hint: 'Restart nastąpi tylko wtedy, gdy zostaną pobrane zmiany.', checked: false },
-      buttons: [{ label: 'Anuluj', value: 'cancel' }, { label: 'Sprawdź i zaktualizuj', value: 'ok', kind: 'primary' }]
+  // Wymazanie historii atmosfery i samopoczucia (wykresy, minimum i maksimum z 24 godzin).
+  bindAction('btn-clear-history', async () => {
+    const ok = await confirmDialog({
+      icon: 'trash', danger: true, title: 'UWAGA!',
+      text: 'Ta operacja bezpowrotnie wymaże *WSZYSTKIE* zapisane dane atmosfery i samopoczucia.\nNa pewno chcesz to zrobić?',
+      buttons: [{ label: 'Rozmyśliłem się', value: 'cancel' }, { label: 'Tak, wiem co robię', value: 'ok', kind: 'danger' }]
     });
-    if (!r) return;
-    modalBusy('update', 'Sprawdzam aktualizacje…', 'To może potrwać chwilę.');
-    let res;
-    try { res = await postJSON('/api/system/update', { reboot: r.checked }); }
+    if (!ok) return;
+    modalBusy('trash', 'Usuwam dane…', 'To może potrwać chwilę.');
+    try { await postJSON('/api/history/clear'); }
     catch (e) {
-      await noticeDialog({ icon: 'alert', danger: true, title: 'Aktualizacja nie powiodła się', text: e.message });
+      await noticeDialog({ icon: 'alert', danger: true, title: 'Nie udało się usunąć danych', text: e.message });
       return;
     }
-    if (!res.updated) await noticeDialog({ icon: 'check', title: 'Masz najnowszą wersję', text: 'Nie ma nic do pobrania.' });
-    else if (res.rebooting) await noticeDialog({ icon: 'power', title: 'Zaktualizowano', text: 'Urządzenie uruchamia się ponownie. Strona wróci za około minutę.' });
-    else await noticeDialog({ icon: 'check', title: 'Zaktualizowano', text: 'Nowa wersja jest pobrana. Pliki .py i main.html zadziałają po ponownym uruchomieniu aplikacji lub urządzenia, a style i skrypty strony po jej odświeżeniu.' });
+    historyCache.clear();                                   // wykresy pobiorą pustą historię od nowa
+    poll();                                                 // minimum i maksimum z 24 godzin też od nowa
+    await noticeDialog({ icon: 'check', title: 'Dane usunięte', text: 'Zapisane dane atmosfery i samopoczucia zostały wymazane.' });
   });
 
+  /* ===== 14. ZABEZPIECZENIA ===== */
+  // Opis całości: app.py, sekcja "Zabezpieczenia". Tu: przycisk z kłódką, PIN (numpad), blokada,
+  // uprawnienia przycisków, parowanie, lista urządzeń, Klucz, zmiana PIN-u.
+  // Atrybuty w main.html: data-admin (opcja administratora), data-only="wyswietlacz|telefon" (gdzie ją widać).
+  let sec = AUTH;
+  const PIN_LEN = AUTH.dlugosc_pinu || 6;
+  const isAdmin = () => sec.poziom === 'admin';
+  const watchers = new Set();       // wołane po każdym odczycie stanu (czekanie na pendrive, na prośbę o parowanie)
+  let lastKeyEvent = null, keyFlow = false;
+
+  async function refreshSecurity() {
+    try { applySecurity(await getJSON('/api/zabezpieczenia/stan')); } catch (e) { }
+  }
+
+  function applySecurity(s) {
+    sec = s;
+    if (s.poziom === 'niesparowane') { location.reload(); return; }
+    const where = s.wyswietlacz ? 'wyswietlacz' : 'telefon';
+    document.body.dataset.poziom = s.poziom;
+    document.body.dataset.urzadzenie = where;
+    document.querySelectorAll('[data-only]').forEach(el => { el.hidden = el.dataset.only !== where; });
+    if ($('security-group')) $('security-group').hidden = !!s.bez_zabezpieczen;
+    // Telefon użytkownika: opcje administratora wyszarzone (na wyświetlaczu nie – tam klik prosi o PIN)
+    const deny = !s.wyswietlacz && !isAdmin();
+    document.querySelectorAll('[data-admin]').forEach(el => el.classList.toggle('is-denied', deny));
+    renderLockButton();
+    renderLockout();
+    // Powiadomienie o wpięciu / wyjęciu Klucza (w trakcie operacji na Kluczu prowadzą własne okna)
+    if (s.wyswietlacz && s.klucz) {
+      if (lastKeyEvent !== null && s.klucz.zdarzenie !== lastKeyEvent && !keyFlow) {
+        showPopup(s.klucz.typ === 'podlaczony'
+          ? 'Klucz podłączony – panel ma uprawnienia administratora.'
+          : 'Klucz odłączony – panel wrócił do poziomu użytkownika.', 5000, false);
+      }
+      lastKeyEvent = s.klucz.zdarzenie;
+    }
+    watchers.forEach(fn => fn(s));
+  }
+
+  /* --- 14a. Przycisk z kłódką w górnym pasku (tylko wyświetlacz) --- */
+  const LOCK_ICONS = {
+    zablokowany: MODAL_ICONS.lock,
+    pin: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.6-1.8"/>',
+    klucz: MODAL_ICONS.usb,
+    brak: MODAL_ICONS.lock
+  };
+  const LOCK_TEXT = {
+    zablokowany: 'Odblokuj Panel', pin: 'Zahasłuj Panel', klucz: 'Klucz zainstalowany w USB', brak: 'Ustaw PIN'
+  };
+
+  function renderLockButton() {
+    const btn = $('lock-btn');
+    btn.hidden = !sec.wyswietlacz || !!sec.bez_zabezpieczen;
+    if (btn.hidden) return;
+    const mode = sec.przez === 'klucz' ? 'klucz' : sec.przez === 'pin' ? 'pin' : sec.pin_ustawiony ? 'zablokowany' : 'brak';
+    if (btn.dataset.mode === mode) return;
+    btn.dataset.mode = mode;
+    $('lock-btn-icon').innerHTML = LOCK_ICONS[mode];
+    $('lock-btn-text').textContent = LOCK_TEXT[mode];
+  }
+
+  $('lock-btn').addEventListener('click', async () => {
+    const mode = $('lock-btn').dataset.mode;
+    if (mode === 'pin') {
+      try { await postJSON('/api/zabezpieczenia/zablokuj'); } catch (e) { }
+      await refreshSecurity();
+      showPopup('Panel zahasłowany.', 3000, false);
+    } else if (mode === 'zablokowany') {
+      unlockPanel();
+    } else if (mode === 'klucz') {
+      showPopup('Panel ma uprawnienia administratora, dopóki Klucz jest wpięty. Wyjmij Klucz, aby zahasłować panel.', 5000, false);
+    } else {
+      noticeDialog({ icon: 'lock', title: 'PIN nie jest ustawiony', text: 'Ustaw PIN administratora w konsoli Raspberry Pi:\n*python3 app.py --ustaw-pin*' });
+    }
+  });
+
+  // Dotyk ekranu przedłuża odblokowanie (najwyżej co 20 s); samo odpytywanie serwera go nie przedłuża.
+  let lastPing = 0;
+  ['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, () => {
+    if (!sec.wyswietlacz || sec.przez !== 'pin' || Date.now() - lastPing < 20000) return;
+    lastPing = Date.now();
+    postJSON('/api/zabezpieczenia/aktywnosc').catch(() => { });
+  }, true));
+
+  /* --- 14b. PIN: własny numpad, zatwierdza się sam po ostatniej cyfrze --- */
+  // pinDialog({title, text, submit}) -> Promise<PIN | null>. submit(pin) sprawdza (serwer albo lokalnie);
+  // wyjątek = komunikat w oknie i wpisywanie od nowa, 423 = blokada (okno się zamyka).
+  const pinState = { resolve: null, submit: null, digits: '', busy: false, lastFocus: null };
+  const pinCard = document.querySelector('.pin-card');
+
+  function renderPinDots() {
+    $('pin-dots').replaceChildren(...Array.from({ length: PIN_LEN }, (_, i) => {
+      const dot = document.createElement('i');
+      if (i < pinState.digits.length) dot.className = 'on';
+      return dot;
+    }));
+  }
+
+  function pinDialog(o) {
+    if (pinState.resolve) pinClose(null);
+    return new Promise(resolve => {
+      Object.assign(pinState, { resolve, submit: o.submit, digits: '', busy: false });
+      $('pin-title').textContent = o.title;
+      $('pin-text').textContent = o.text || '';
+      $('pin-text').hidden = !o.text;
+      $('pin-error').textContent = '';
+      renderPinDots();
+      if (!$('pin-modal').classList.contains('open')) pinState.lastFocus = document.activeElement;
+      pageParts().forEach(el => { el.inert = true; });
+      $('pin-modal').classList.add('open');
+      $('pin-pad').querySelector('[data-key="5"]').focus({ preventScroll: true });
+    });
+  }
+
+  function pinClose(result) {
+    $('pin-modal').classList.remove('open');
+    if (!$('modal').classList.contains('open') && !$('devices-panel').classList.contains('open')) {
+      pageParts().forEach(el => { el.inert = false; });
+    }
+    const r = pinState.resolve;
+    pinState.resolve = null;
+    if (pinState.lastFocus && pinState.lastFocus.focus && !$('modal').classList.contains('open')) {
+      pinState.lastFocus.focus({ preventScroll: true });
+    }
+    if (r) r(result);
+  }
+
+  async function pinKey(k) {
+    if (!pinState.resolve || pinState.busy) return;
+    if (k === 'anuluj') { pinClose(null); return; }
+    if (k === 'usun') { pinState.digits = pinState.digits.slice(0, -1); renderPinDots(); return; }
+    if (!/^\d$/.test(k) || pinState.digits.length >= PIN_LEN) return;
+    pinState.digits += k;
+    $('pin-error').textContent = '';
+    renderPinDots();
+    if (pinState.digits.length < PIN_LEN) return;
+    const value = pinState.digits;
+    pinState.busy = true;
+    pinCard.classList.add('is-busy');
+    try {
+      await pinState.submit(value);
+      pinClose(value);
+    } catch (e) {
+      if (e.status === 423) { pinClose(null); refreshSecurity(); return; }
+      const left = e.data && e.data.pozostalo;
+      $('pin-error').textContent = e.message + (left ? '. Pozostało prób: ' + left + '.' : '');
+      pinState.digits = '';
+      renderPinDots();
+      pinCard.classList.remove('shake');
+      void pinCard.offsetWidth;
+      pinCard.classList.add('shake');
+    } finally {
+      pinState.busy = false;
+      pinCard.classList.remove('is-busy');
+    }
+  }
+
+  $('pin-pad').addEventListener('click', e => {
+    const b = e.target.closest('[data-key]');
+    if (b) pinKey(b.dataset.key);
+  });
+  $('pin-backdrop').addEventListener('click', () => pinKey('anuluj'));
+  pinCard.addEventListener('animationend', () => pinCard.classList.remove('shake'));
+  document.addEventListener('keydown', e => {
+    if (!$('pin-modal').classList.contains('open')) return;
+    if (/^\d$/.test(e.key)) pinKey(e.key);
+    else if (e.key === 'Backspace') pinKey('usun');
+    else if (e.key === 'Escape') pinKey('anuluj');
+    else if (e.key === 'Tab') {                                // fokus krąży po klawiszach numpadu
+      const keys = [...$('pin-pad').querySelectorAll('button')];
+      const i = keys.indexOf(document.activeElement);
+      keys[(i + (e.shiftKey ? -1 : 1) + keys.length) % keys.length].focus();
+    } else return;
+    e.preventDefault();
+  });
+
+  async function unlockPanel(text) {
+    const pin = await pinDialog({
+      title: 'Podaj PIN administratora',
+      text: text || 'Panel odblokuje się na 5 minut od ostatniego dotknięcia ekranu.',
+      submit: p => postJSON('/api/zabezpieczenia/pin', { pin: p })
+    });
+    if (pin) { lastPing = Date.now(); await refreshSecurity(); }
+    return !!pin;
+  }
+
+  /* --- 14c. Opcje administratora: na wyświetlaczu klik prosi o PIN, na telefonie użytkownika – okno o braku uprawnień --- */
+  document.addEventListener('click', e => {
+    const gate = e.target.closest('[data-admin]');
+    if (!gate || isAdmin() || sec.bez_zabezpieczen) return;
+    if (gate.dataset.admin === 'telefon' && sec.wyswietlacz) return;
+    const ctrl = e.target.closest('button, label, input, .dd-trigger');
+    if (!ctrl || !gate.contains(ctrl)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (sec.wyswietlacz) {
+      unlockPanel('Ta opcja wymaga uprawnień administratora.').then(ok => { if (ok) ctrl.click(); });
+    } else {
+      noticeDialog({
+        icon: 'lock', title: 'Brak uprawnień',
+        text: 'Ta opcja wymaga urządzenia z uprawnieniami administratora.\nUprawnienia nadaje administrator: Ustawienia → Działanie → Urządzenia.'
+      });
+    }
+  }, true);
+
+  /* --- 14d. Blokada po 5 błędnych PIN-ach: licznik MM:SS:setne --- */
+  let lockoutEnd = 0, lockoutHiddenFor = 0, lockoutFrame = null;
+  const two = n => String(n).padStart(2, '0');
+
+  function lockoutTick() {
+    const ms = Math.max(0, lockoutEnd - performance.now());
+    $('lockout-timer').textContent = two(Math.floor(ms / 60000)) + ':' + two(Math.floor(ms / 1000) % 60) + ':' + two(Math.floor(ms / 10) % 100);
+    if (ms > 0 && !$('lockout').hidden) lockoutFrame = requestAnimationFrame(lockoutTick);
+  }
+
+  function renderLockout() {
+    const left = sec.blokada || 0, box = $('lockout');
+    if (left <= 0) {
+      box.hidden = true;
+      lockoutEnd = 0;
+      cancelAnimationFrame(lockoutFrame);
+      return;
+    }
+    const end = performance.now() + left * 1000;
+    if (!lockoutEnd || Math.abs(end - lockoutEnd) > 800) lockoutEnd = end;    // bez drgań licznika przy każdym odczycie
+    const adminPhone = !sec.wyswietlacz && isAdmin();
+    $('lockout-actions').hidden = !adminPhone;
+    $('lockout-text').textContent = sec.wyswietlacz
+      ? 'Pięć razy wpisano błędny PIN administratora. Panel odblokuje się sam za:'
+      : 'Na wyświetlaczu ula pięć razy wpisano błędny PIN administratora. Ul odblokuje się sam za:';
+    if (adminPhone && Math.abs(lockoutHiddenFor - lockoutEnd) < 2000) { box.hidden = true; return; }
+    if (box.hidden) {
+      box.hidden = false;
+      if (pinState.resolve) pinClose(null);
+      lockoutTick();
+    }
+  }
+
+  $('lockout-lift').addEventListener('click', async () => {
+    try { await postJSON('/api/zabezpieczenia/zdejmij-blokade'); showPopup('Blokada zdjęta.', 4000, false); }
+    catch (e) { showPopup('Nie udało się zdjąć blokady: ' + e.message, 6000, false); }
+    refreshSecurity();
+  });
+  $('lockout-hide').addEventListener('click', () => {
+    lockoutHiddenFor = lockoutEnd;
+    $('lockout').hidden = true;
+  });
+
+  /* --- 14e. Parowanie (wyświetlacz): krok 1 Wi-Fi, krok 2 kod, potem decyzja --- */
+  const wifiText = v => String(v).replace(/([\\;,:"])/g, '\\$1');
+  const stickText = s => s.nazwa + (s.rozmiar ? ', ' + (s.rozmiar / 1e9).toFixed(s.rozmiar < 1e10 ? 1 : 0).replace('.', ',') + ' GB' : '');
+
+  function infoLine(label, value) {
+    const row = document.createElement('div');
+    row.className = 'qr-line';
+    row.innerHTML = '<span class="setting-desc"></span><strong></strong>';
+    row.firstChild.textContent = label;
+    row.lastChild.textContent = value;
+    return row;
+  }
+
+  function qrBox(text, label, lines) {
+    const box = document.createElement('div');
+    box.className = 'qr-box';
+    const frame = document.createElement('div');
+    frame.className = 'qr-frame';
+    frame.appendChild(BeeQR.svg(text, label));
+    const info = document.createElement('div');
+    info.className = 'qr-info';
+    lines.forEach(l => info.appendChild(l));
+    box.append(frame, info);
+    return box;
+  }
+
+  function toggleRow(label, hint, checked) {
+    const row = document.createElement('label');
+    row.className = 'modal-option';
+    row.innerHTML = '<span><span class="setting-label"></span><span class="setting-desc"></span></span>'
+      + '<span class="toggle-switch"><input type="checkbox"><span class="slider"></span></span>';
+    row.querySelector('.setting-label').textContent = label;
+    row.querySelector('.setting-desc').textContent = hint;
+    const input = row.querySelector('input');
+    input.checked = checked;
+    return { row, input };
+  }
+
+  bindAction('btn-pair', async () => {
+    modalBusy('wifi', 'Wczytuję dane Wi-Fi…', '');
+    let info;
+    try { info = await getJSON('/api/parowanie/wifi'); } catch (e) { info = { error: e.message }; }
+    const w = info.wifi;
+    const r = await askModal({
+      icon: w ? false : 'wifi', wide: !!w,
+      title: 'Krok 1 z 2: połącz telefon z Wi-Fi ula',
+      text: w ? 'Zeskanuj kod aparatem telefonu albo wpisz dane ręcznie.'
+        : info.error + '\nJeśli telefon jest już w sieci ula, przejdź dalej.',
+      content: w ? qrBox('WIFI:T:WPA;S:' + wifiText(w.ssid) + ';P:' + wifiText(w.haslo) + ';;', 'Kod QR sieci Wi-Fi ula',
+        [infoLine('Nazwa sieci', w.ssid), infoLine('Hasło', w.haslo)]) : null,
+      buttons: [{ label: 'Anuluj', value: 'cancel' }, { label: 'Dalej', value: 'ok', kind: 'primary' }]
+    });
+    if (r.value !== 'ok') { modalClose(); return; }
+    await pairCode();
+  });
+
+  async function pairCode() {
+    modalBusy('phone', 'Tworzę kod parowania…', '');
+    let code;
+    try { code = await postJSON('/api/parowanie/kod'); }
+    catch (e) { await noticeDialog({ icon: 'alert', danger: true, title: 'Nie udało się utworzyć kodu', text: e.message }); return; }
+    const host = code.adres.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    const timeLine = infoLine('Kod ważny jeszcze', '');
+    const box = qrBox(code.adres, 'Kod QR parowania z ulem',
+      [infoLine('Albo wejdź na', host), infoLine('i wpisz kod', code.cyfry.slice(0, 3) + ' ' + code.cyfry.slice(3)), timeLine]);
+    box.querySelectorAll('strong')[1].classList.add('pair-digits');
+    const end = Date.now() + code.czas * 1000;
+    const tick = () => {
+      const s = Math.max(0, Math.round((end - Date.now()) / 1000));
+      timeLine.lastChild.textContent = s ? Math.floor(s / 60) + ':' + two(s % 60) : 'kod wygasł – utwórz nowy';
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    let watcher;
+    const arrived = new Promise(res => {
+      watcher = s => { if (s.prosba) res({ value: 'request', prosba: s.prosba }); };
+      watchers.add(watcher);
+    });
+    const asked = askModal({
+      icon: false, wide: true, title: 'Krok 2 z 2: sparuj telefon z ulem',
+      text: 'Zeskanuj kod telefonem połączonym z Wi-Fi ula. Potem zatwierdzisz go tutaj.',
+      content: box,
+      buttons: [{ label: 'Anuluj', value: 'cancel' }, { label: 'Nowy kod', value: 'again' }]
+    });
+    const res = await Promise.race([asked, arrived]);
+    clearInterval(timer);
+    watchers.delete(watcher);
+    if (res.value === 'again') return pairCode();
+    if (res.value !== 'request') { postJSON('/api/parowanie/anuluj').catch(() => { }); modalClose(); return; }
+    await pairDecision(res.prosba);
+  }
+
+  async function pairDecision(p) {
+    const box = document.createElement('div');
+    box.className = 'modal-toggles';
+    const adm = toggleRow('Nadaj urządzeniu stałe uprawnienia administratora', 'Bez wymogu PIN-u, także zmiana PIN-u ula.', true);
+    const rem = toggleRow('Zapamiętaj urządzenie', 'Wyłączone: ul zapomni urządzenie 10 minut po opuszczeniu strony lub rozłączeniu z siecią.', true);
+    box.append(adm.row, rem.row);
+    const r = await askModal({
+      icon: 'phone', title: 'Nowe urządzenie', text: '*' + p.nazwa + '* chce połączyć się z ulem.', content: box,
+      buttons: [{ label: 'Odrzuć', value: 'no' }, { label: 'Dodaj', value: 'ok', kind: 'primary' }]
+    });
+    const yes = r.value === 'ok', admin = adm.input.checked;
+    modalBusy('phone', yes ? 'Dodaję urządzenie…' : 'Odrzucam…', '');
+    try {
+      await postJSON('/api/parowanie/decyzja', { prosba: p.id, zgoda: yes, admin, zapamietaj: rem.input.checked });
+    } catch (e) {
+      await noticeDialog({ icon: 'alert', danger: true, title: 'Nie udało się', text: e.message });
+      return;
+    }
+    if (!yes) { modalClose(); showPopup('Odrzucono urządzenie ' + p.nazwa + '.', 5000, false); return; }
+    await noticeDialog({
+      icon: 'check', title: 'Urządzenie sparowane',
+      text: '*' + p.nazwa + '* ma teraz dostęp do ula' + (admin ? ' z uprawnieniami administratora.' : ' (podgląd).')
+    });
+  }
+
+  /* --- 14f. Urządzenia: panel wysuwany od prawej --- */
+  const devicesPanel = $('devices-panel');
+
+  function openDevices() {
+    devicesPanel.classList.add('open');
+    pageParts().forEach(el => { el.inert = true; });
+    $('devices-close').focus({ preventScroll: true });
+    return loadDevices();
+  }
+  function closeDevices() {
+    devicesPanel.classList.remove('open');
+    if (!$('modal').classList.contains('open')) pageParts().forEach(el => { el.inert = false; });
+    $('btn-devices').focus({ preventScroll: true });
+  }
+  $('devices-close').addEventListener('click', closeDevices);
+  $('devices-backdrop').addEventListener('click', closeDevices);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && devicesPanel.classList.contains('open') && !$('modal').classList.contains('open')
+      && !$('pin-modal').classList.contains('open')) closeDevices();
+  });
+
+  function seenText(d) {
+    if (d.ostatnio) {
+      const ago = Date.now() / 1000 - d.ostatnio;
+      return ago < 90 ? 'aktywne teraz' : 'ostatnio ' + new Date(d.ostatnio * 1000).toLocaleString('pl-PL', { dateStyle: 'medium', timeStyle: 'short' });
+    }
+    return d.dodano ? 'dodane ' + d.dodano : '';
+  }
+
+  function iconButton(icon, label, cls) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'icon-btn ' + (cls || '');
+    b.title = label;
+    b.setAttribute('aria-label', label);
+    b.innerHTML = '<svg viewBox="0 0 24 24">' + MODAL_ICONS[icon] + '</svg>';
+    return b;
+  }
+
+  async function loadDevices() {
+    const list = $('device-list');
+    let data;
+    try { data = await getJSON('/api/urzadzenia'); }
+    catch (e) {
+      const li = document.createElement('li');
+      li.className = 'device-empty';
+      li.textContent = 'Nie udało się pobrać listy: ' + e.message;
+      list.replaceChildren(li);
+      return;
+    }
+    if (!data.urzadzenia.length) {
+      const li = document.createElement('li');
+      li.className = 'device-empty';
+      li.textContent = 'Brak zapamiętanych urządzeń. Telefon sparujesz na wyświetlaczu ula: Ustawienia → Działanie → Sparuj urządzenie.';
+      list.replaceChildren(li);
+      return;
+    }
+    list.replaceChildren(...data.urzadzenia.map(d => {
+      const li = document.createElement('li');
+      li.className = 'device-row' + (d.admin ? ' is-admin' : '');
+      li.innerHTML = '<div class="ico"><svg viewBox="0 0 24 24">' + MODAL_ICONS.phone + '</svg></div>'
+        + '<div class="device-text"><div class="setting-label"></div><div class="setting-desc"></div></div>';
+      li.querySelector('.setting-label').textContent = d.nazwa + (d.to_urzadzenie ? ' (to urządzenie)' : '');
+      li.querySelector('.setting-desc').textContent = [d.admin ? 'Administrator' : 'Podgląd', seenText(d)].filter(Boolean).join(' · ');
+      // Korona = nadaj administratora, przekreślona korona = odbierz
+      const crown = iconButton(d.admin ? 'crownOff' : 'crown', d.admin ? 'Odbierz uprawnienia administratora' : 'Nadaj uprawnienia administratora', 'crown-btn');
+      const trash = iconButton('trash', 'Zapomnij urządzenie', 'trash-btn');
+      crown.addEventListener('click', () => deviceAdmin(d));
+      trash.addEventListener('click', () => deviceForget(d));
+      li.append(crown, trash);
+      return li;
+    }));
+  }
+
+  async function deviceAdmin(d) {
+    const ok = await confirmDialog({
+      icon: d.admin ? 'crownOff' : 'crown',
+      title: d.admin ? 'Odebrać uprawnienia administratora?' : 'Nadać uprawnienia administratora?',
+      text: d.admin ? '*' + d.nazwa + '* będzie mieć tylko podgląd ula.' : '*' + d.nazwa + '* będzie mogło zmieniać wszystkie ustawienia ula bez PIN-u.',
+      buttons: [{ label: 'Anuluj', value: 'cancel' }, { label: d.admin ? 'Odbierz' : 'Nadaj', value: 'ok', kind: 'primary' }]
+    });
+    if (!ok) return;
+    modalClose();
+    try { await postJSON('/api/urzadzenia/admin', { id: d.id, admin: !d.admin }); }
+    catch (e) { showPopup('Nie udało się: ' + e.message, 6000, false); }
+    if (d.to_urzadzenie) await refreshSecurity();
+    if (isAdmin()) loadDevices(); else closeDevices();
+  }
+
+  async function deviceForget(d) {
+    const ok = await confirmDialog({
+      icon: 'trash', danger: true, title: 'Zapomnieć urządzenie?',
+      text: '*' + d.nazwa + '* straci dostęp do ula i będzie musiało sparować się od nowa.',
+      buttons: [{ label: 'Anuluj', value: 'cancel' }, { label: 'Zapomnij', value: 'ok', kind: 'danger' }]
+    });
+    if (!ok) return;
+    modalClose();
+    try { await postJSON('/api/urzadzenia/zapomnij', { id: d.id }); }
+    catch (e) { showPopup('Nie udało się: ' + e.message, 6000, false); return; }
+    if (d.to_urzadzenie) { location.replace('/'); return; }
+    loadDevices();
+  }
+
+  bindAction('btn-devices', openDevices);
+
+  /* --- 14g. Klucz (tylko wyświetlacz; jest tylko jeden port USB) --- */
+  // Czeka, aż stan spełni warunek (np. wpięty pendrive). Okno z kręciołkiem i "Anuluj" -> wartość albo null.
+  function waitFor(o, test) {
+    return new Promise(resolve => {
+      let done = false;
+      const finish = v => { if (done) return; done = true; watchers.delete(w); resolve(v); };
+      const w = s => { const v = test(s); if (v) finish(v); };
+      askModal({ ...o, busy: true, buttons: [{ label: 'Anuluj', value: 'cancel' }] }).then(() => finish(null));
+      watchers.add(w);
+      w(sec);
+    });
+  }
+
+  async function keyStep(fn) {                     // operacja na Kluczu: bez powiadomień o wpięciu / wyjęciu
+    keyFlow = true;
+    try { await fn(); }
+    finally {
+      await refreshSecurity();
+      keyFlow = false;
+      if (sec.klucz) lastKeyEvent = sec.klucz.zdarzenie;
+    }
+  }
+
+  bindAction('btn-key', async () => {
+    const k = sec.klucz || {};
+    const r = await askModal({
+      icon: 'usb', title: 'Klucz',
+      text: !k.ustawiony ? 'Brak Klucza. Klucz to pendrive, który zastępuje PIN administratora: wpięty daje panelowi uprawnienia administratora i zdejmuje blokadę.'
+        : k.wpiety ? 'Klucz jest ustawiony i wpięty – panel ma uprawnienia administratora.'
+          : 'Klucz jest ustawiony. Wpięty Klucz daje panelowi uprawnienia administratora i zdejmuje blokadę.',
+      buttons: k.ustawiony
+        ? [{ label: 'Zamknij', value: 'cancel' }, { label: 'Unieważnij', value: 'revoke', kind: 'danger' }, { label: 'Duplikuj', value: 'dup', kind: 'primary' }]
+        : [{ label: 'Zamknij', value: 'cancel' }, { label: 'Utwórz Klucz', value: 'create', kind: 'primary' }]
+    });
+    if (r.value === 'create') return keyStep(keyCreate);
+    if (r.value === 'dup') return keyStep(keyDuplicate);
+    if (r.value === 'revoke') return keyStep(keyRevoke);
+    modalClose();
+  });
+
+  async function keyCreate() {
+    const stick = await waitFor({ icon: 'usb', title: 'Wepnij pendrive', text: 'Wepnij pendrive, który ma zostać Kluczem. Pozostałe pliki na nim zostaną.' },
+      s => (s.usb || [])[0]);
+    if (!stick) { modalClose(); return; }
+    const ok = await confirmDialog({
+      icon: 'usb', title: 'Zapisać Klucz?', text: 'Zapisać Klucz na pendrive *' + stickText(stick) + '*?\nPozostałe pliki na nim zostaną.',
+      buttons: [{ label: 'Anuluj', value: 'cancel' }, { label: 'Zapisz Klucz', value: 'ok', kind: 'primary' }]
+    });
+    if (!ok) return;
+    modalBusy('usb', 'Zapisuję Klucz…', 'Nie wyjmuj pendrive\'a.');
+    try { await postJSON('/api/klucz/utworz', { pendrive: stick.nazwa }); }
+    catch (e) { await noticeDialog({ icon: 'alert', danger: true, title: 'Nie udało się utworzyć Klucza', text: e.message }); return; }
+    await noticeDialog({ icon: 'check', title: 'Klucz utworzony', text: 'Dopóki ten pendrive jest wpięty, panel ma uprawnienia administratora. Przechowuj go w bezpiecznym miejscu.' });
+  }
+
+  async function keyDuplicate() {
+    const cancel = () => { postJSON('/api/klucz/duplikuj/anuluj').catch(() => { }); modalClose(); };
+    if (!(sec.klucz || {}).wpiety) {
+      const ok = await waitFor({ icon: 'usb', title: 'Wepnij oryginalny Klucz', text: 'Najpierw wepnij Klucz, który chcesz zduplikować.' },
+        s => s.klucz && s.klucz.wpiety);
+      if (!ok) { modalClose(); return; }
+    }
+    try { await postJSON('/api/klucz/duplikuj/start'); }
+    catch (e) { await noticeDialog({ icon: 'alert', danger: true, title: 'Nie udało się', text: e.message }); return; }
+    const out = await waitFor({ icon: 'usb', title: 'Wyjmij oryginalny Klucz', text: 'Klucz został sprawdzony. Wyjmij go teraz – w jego miejsce wepniesz pendrive na kopię.' },
+      s => !(s.usb || []).length);
+    if (!out) { cancel(); return; }
+    const stick = await waitFor({ icon: 'usb', title: 'Wepnij pendrive na kopię', text: 'Wepnij pendrive, na który ma trafić kopia Klucza. Pozostałe pliki na nim zostaną.' },
+      s => (s.usb || []).find(x => x.klucz !== 'wazny'));
+    if (!stick) { cancel(); return; }
+    const ok = await confirmDialog({
+      icon: 'usb', title: 'Skopiować Klucz?', text: 'Skopiować Klucz na pendrive *' + stickText(stick) + '*?\nPozostałe pliki na nim zostaną.',
+      buttons: [{ label: 'Anuluj', value: 'cancel' }, { label: 'Skopiuj Klucz', value: 'ok', kind: 'primary' }]
+    });
+    if (!ok) { cancel(); return; }
+    modalBusy('usb', 'Kopiuję Klucz…', 'Nie wyjmuj pendrive\'a.');
+    try { await postJSON('/api/klucz/duplikuj/zapisz', { pendrive: stick.nazwa }); }
+    catch (e) { await noticeDialog({ icon: 'alert', danger: true, title: 'Nie udało się skopiować Klucza', text: e.message }); return; }
+    await noticeDialog({ icon: 'check', title: 'Kopia Klucza utworzona', text: 'Oba pendrive\'y działają jako Klucz. Unieważnienie Klucza wyłącza wszystkie kopie naraz.' });
+  }
+
+  async function keyRevoke() {
+    const ok = await confirmDialog({
+      icon: 'usb', danger: true, title: 'Unieważnić Klucz?',
+      text: '*Wszystkie* kopie Klucza przestaną działać. Do czasu utworzenia nowego działa tylko PIN.',
+      buttons: [{ label: 'Anuluj', value: 'cancel' }, { label: 'Unieważnij', value: 'ok', kind: 'danger' }]
+    });
+    if (!ok) return;
+    modalBusy('usb', 'Unieważniam Klucz…', '');
+    try { await postJSON('/api/klucz/uniewaznij'); await refreshSecurity(); }
+    catch (e) { await noticeDialog({ icon: 'alert', danger: true, title: 'Nie udało się', text: e.message }); return; }
+    const r = await askModal({
+      icon: 'check', title: 'Klucz unieważniony', text: 'Utworzyć nowy Klucz teraz? Możesz użyć tego samego pendrive\'a.',
+      buttons: [{ label: 'Później', value: 'cancel' }, { label: 'Utwórz nowy', value: 'ok', kind: 'primary' }]
+    });
+    if (r.value === 'ok') return keyCreate();
+    modalClose();
+  }
+
+  /* --- 14h. Zmiana PIN-u i odłączenie telefonu --- */
+  // Wyświetlacz z Kluczem i telefon administratora – bez starego PIN-u; wyświetlacz bez Klucza – ze starym.
+  bindAction('btn-pin', async () => {
+    let old = null;
+    if (sec.wyswietlacz && !(sec.klucz || {}).wpiety) {
+      old = await pinDialog({ title: 'Podaj obecny PIN', text: 'Bez Klucza zmiana PIN-u wymaga obecnego PIN-u.', submit: p => postJSON('/api/zabezpieczenia/pin', { pin: p }) });
+      if (!old) return;
+      lastPing = Date.now();
+    }
+    const first = await pinDialog({ title: 'Nowy PIN', text: 'Wpisz nowy PIN (' + PIN_LEN + ' cyfr).', submit: async () => true });
+    if (!first) return;
+    const second = await pinDialog({
+      title: 'Powtórz nowy PIN', text: 'Wpisz nowy PIN jeszcze raz.',
+      submit: async p => { if (p !== first) throw new Error('PIN-y się różnią. Wpisz nowy PIN ponownie'); }
+    });
+    if (!second) return;
+    await postJSON('/api/zabezpieczenia/zmien-pin', { stary: old, nowy: first });
+    refreshSecurity();
+    showPopup('PIN administratora został zmieniony.', 5000, false);
+  });
+
+  bindAction('btn-leave', async () => {
+    const ok = await confirmDialog({
+      icon: 'phone', danger: true, title: 'Odłączyć od ula?',
+      text: 'To urządzenie straci dostęp do ula. Żeby wrócić, trzeba je ponownie sparować na wyświetlaczu ula.',
+      buttons: [{ label: 'Anuluj', value: 'cancel' }, { label: 'Odłącz', value: 'ok', kind: 'danger' }]
+    });
+    if (!ok) return;
+    modalClose();
+    await postJSON('/api/urzadzenia/odlacz');
+    location.replace('/');
+  });
+
+  setInterval(refreshSecurity, AUTH.wyswietlacz ? 1000 : 2000);
+
   /* ===== 13. INIT ===== */
+  applySecurity(AUTH);
   applySettingsToUI();
   applyCamera(settings.camera);     // rysuje stronę i od razu odpytuje serwer
-  pullServerSettings();
+  migrateBrowserSettings();
 })();

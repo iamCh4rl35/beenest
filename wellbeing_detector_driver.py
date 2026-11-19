@@ -8,6 +8,13 @@ import random
 
 KEYS = ("w_frequency", "w_sound")
 
+# Progi oceny "Stan rodziny" (Hz / dB). Używa ich app.py do wyliczenia stanu,
+# a wykres w zakładce Samopoczucie rysuje na ich granicach delikatne poziome linie.
+WELLBEING_OK_HZ = (80, 185)          # Dobre
+WELLBEING_SENSITIVE_HZ = (185, 250)  # Niespokojne
+WELLBEING_UPLIFTET_HZ = (250, 300)   # Wściekłe
+WELLBEING_MAX_DB = 70
+
 
 def read() -> dict:
     """

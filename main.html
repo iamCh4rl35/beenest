@@ -7,12 +7,19 @@
   <meta name="theme-color" content="#FF8A00">
   <title>Centrala BEENest</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <!-- [wyglad] z data/global.conf – nadpisuje wartości z style.css -->
+  <style id="conf-look">{{ look_css|safe }}</style>
 </head>
 
 <body data-theme="bialy-pylek" data-contrast="normal">
 
   <header class="topbar">
     <a href="#home" class="logo">BEE<span>NEST</span></a>
+    <!-- Tylko wyświetlacz przy ulu, na środku paska: odblokowanie PIN-em / "Zahasłuj Panel" / stan Klucza -->
+    <button type="button" class="lock-btn" id="lock-btn" hidden>
+      <svg viewBox="0 0 24 24" id="lock-btn-icon"></svg>
+      <span id="lock-btn-text"></span>
+    </button>
     <div class="datetime" id="datetime">--</div>
   </header>
   <div class="divider"></div>
@@ -178,50 +185,90 @@
     </section>
 
     <!-- ============ TEMPERATURA ============ -->
-    <section id="temperatura" class="page">
-      <a href="#home" class="back-btn">← Wróć do panelu</a>
-      <h1>Atmosfera</h1>
-      <p class="lead">Temperatura, wilgotność i ciśnienie w ulu i na zewnątrz oraz minimum i maksimum z ostatnich 24 godzin.</p>
-      <div class="atmo-table">
-        <div class="atmo-head"></div>
-        <div class="atmo-head">W ulu</div>
-        <div class="atmo-head">Na zewnątrz</div>
-        <div class="atmo-param">Temperatura</div>
-        <div class="stat atmo-cell" id="atmo-cell-temperatura-in">
-          <div class="value"><span id="temp-current">--</span><span class="unit">°C</span></div>
-          <div class="atmo-range">min <span id="temp-min">--</span> · maks <span id="temp-max">--</span> <span class="unit-s">°C</span></div>
+    <section id="temperatura" class="page page-chart">
+      <div class="page-head">
+        <a href="#home" class="back-btn">← Wróć do panelu</a>
+        <h1>Atmosfera</h1>
+      </div>
+      <!-- Odczyty: w ulu / na zewnątrz + minimum i maksimum z 24 godzin. Kliknięcie grupy pokazuje ją na wykresie. -->
+      <div class="atmo-strip">
+        <div class="atmo-group" data-param="temperatura" role="button" tabindex="0" aria-label="Pokaż na wykresie: Temperatura">
+          <div class="atmo-group-title">Temperatura <span>· ostatnie 24 godziny</span></div>
+          <div class="atmo-group-cells">
+            <div class="stat atmo-cell" id="atmo-cell-temperatura-in">
+              <div class="label">W ulu</div>
+              <div class="value"><span id="temp-current">--</span><span class="unit">°C</span></div>
+              <div class="atmo-range">minimum <span id="temp-min">--</span> · maksimum <span id="temp-max">--</span></div>
+            </div>
+            <div class="stat atmo-cell" id="atmo-cell-temperatura-out">
+              <div class="label">Na zewnątrz</div>
+              <div class="value"><span id="temp-outside">--</span><span class="unit">°C</span></div>
+              <div class="atmo-range">minimum <span id="temp-outside-min">--</span> · maksimum <span id="temp-outside-max">--</span></div>
+            </div>
+          </div>
         </div>
-        <div class="stat atmo-cell" id="atmo-cell-temperatura-out">
-          <div class="value"><span id="temp-outside">--</span><span class="unit">°C</span></div>
-          <div class="atmo-range">min <span id="temp-outside-min">--</span> · maks <span id="temp-outside-max">--</span> <span class="unit-s">°C</span></div>
+        <div class="atmo-group" data-param="wilgoc" role="button" tabindex="0" aria-label="Pokaż na wykresie: Wilgotność">
+          <div class="atmo-group-title">Wilgotność <span>· ostatnie 24 godziny</span></div>
+          <div class="atmo-group-cells">
+            <div class="stat atmo-cell" id="atmo-cell-wilgoc-in">
+              <div class="label">W ulu</div>
+              <div class="value"><span id="temp-humidity">--</span><span class="unit">%</span></div>
+              <div class="atmo-range">minimum <span id="temp-humidity-min">--</span> · maksimum <span id="temp-humidity-max">--</span></div>
+            </div>
+            <div class="stat atmo-cell" id="atmo-cell-wilgoc-out">
+              <div class="label">Na zewnątrz</div>
+              <div class="value"><span id="temp-outside-humidity">--</span><span class="unit">%</span></div>
+              <div class="atmo-range">minimum <span id="temp-outside-humidity-min">--</span> · maksimum <span id="temp-outside-humidity-max">--</span></div>
+            </div>
+          </div>
         </div>
-        <div class="atmo-param">Wilgotność</div>
-        <div class="stat atmo-cell" id="atmo-cell-wilgoc-in">
-          <div class="value"><span id="temp-humidity">--</span><span class="unit">%</span></div>
-          <div class="atmo-range">min <span id="temp-humidity-min">--</span> · maks <span id="temp-humidity-max">--</span> <span class="unit-s">%</span></div>
+        <div class="atmo-group" data-param="cisnienie" role="button" tabindex="0" aria-label="Pokaż na wykresie: Ciśnienie">
+          <div class="atmo-group-title">Ciśnienie <span>· ostatnie 24 godziny</span></div>
+          <div class="atmo-group-cells">
+            <div class="stat atmo-cell" id="atmo-cell-cisnienie-in">
+              <div class="label">W ulu</div>
+              <div class="value"><span id="temp-pressure">--</span><span class="unit">hPa</span></div>
+              <div class="atmo-range">minimum <span id="temp-pressure-min">--</span> · maksimum <span id="temp-pressure-max">--</span></div>
+            </div>
+            <div class="stat atmo-cell" id="atmo-cell-cisnienie-out">
+              <div class="label">Na zewnątrz</div>
+              <div class="value"><span id="temp-outside-pressure">--</span><span class="unit">hPa</span></div>
+              <div class="atmo-range">minimum <span id="temp-outside-pressure-min">--</span> · maksimum <span id="temp-outside-pressure-max">--</span></div>
+            </div>
+          </div>
         </div>
-        <div class="stat atmo-cell" id="atmo-cell-wilgoc-out">
-          <div class="value"><span id="temp-outside-humidity">--</span><span class="unit">%</span></div>
-          <div class="atmo-range">min <span id="temp-outside-humidity-min">--</span> · maks <span id="temp-outside-humidity-max">--</span> <span class="unit-s">%</span></div>
-        </div>
-        <div class="atmo-param">Ciśnienie</div>
-        <div class="stat atmo-cell" id="atmo-cell-cisnienie-in">
-          <div class="value"><span id="temp-pressure">--</span><span class="unit">hPa</span></div>
-          <div class="atmo-range">min <span id="temp-pressure-min">--</span> · maks <span id="temp-pressure-max">--</span> <span class="unit-s">hPa</span></div>
-        </div>
-        <div class="stat atmo-cell" id="atmo-cell-cisnienie-out">
-          <div class="value"><span id="temp-outside-pressure">--</span><span class="unit">hPa</span></div>
-          <div class="atmo-range">min <span id="temp-outside-pressure-min">--</span> · maks <span id="temp-outside-pressure-max">--</span> <span class="unit-s">hPa</span></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-host" id="atmo-chart"></div>
+        <div class="chart-foot">
+          <!-- Zakres wykresu (czas do teraz). Średnie i zakresy: app.py -> CHART_RANGES -->
+          <div class="camera-dock chart-dock" id="atmo-range-dock" role="tablist" aria-label="Zakres wykresu">
+            <button class="camera-dock-btn" role="tab" data-range="12h" title="Średnia z 15 minut">12 godzin</button>
+            <button class="camera-dock-btn active" role="tab" data-range="1d" title="Średnia z 30 minut">1 dzień</button>
+            <button class="camera-dock-btn" role="tab" data-range="3d" title="Średnia z godziny">3 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="7d" title="Średnia z dnia">7 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="14d" title="Średnia z dnia">14 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="30d" title="Średnia z 3 dni">30 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="3m" title="Średnia z tygodnia">3 miesiące</button>
+            <button class="camera-dock-btn" role="tab" data-range="6m" title="Średnia z 2 tygodni">6 miesięcy</button>
+          </div>
+          <!-- Parametr na wykresie -->
+          <div class="camera-dock chart-dock" id="atmo-param-dock" role="tablist" aria-label="Parametr wykresu">
+            <button class="camera-dock-btn active" role="tab" data-param="temperatura">Temperatura</button>
+            <button class="camera-dock-btn" role="tab" data-param="wilgoc">Wilgotność</button>
+            <button class="camera-dock-btn" role="tab" data-param="cisnienie">Ciśnienie</button>
+          </div>
         </div>
       </div>
     </section>
 
     <!-- ============ SAMOPOCZUCIE ============ -->
-    <section id="samopoczucie" class="page">
-      <a href="#home" class="back-btn">← Wróć do panelu</a>
-      <h1>Samopoczucie pszczół</h1>
-      <p class="lead">Stan rodziny, częstotliwości i natężenie dźwięku.</p>
-      <div class="stats">
+    <section id="samopoczucie" class="page page-chart">
+      <div class="page-head">
+        <a href="#home" class="back-btn">← Wróć do panelu</a>
+        <h1>Samopoczucie pszczół</h1>
+      </div>
+      <div class="stats stats-strip">
         <div class="stat primary">
           <div class="label">Stan rodziny</div>
           <div class="value small"><span id="w-status">--</span></div>
@@ -234,9 +281,27 @@
           <div class="label">Natężenie dźwięku</div>
           <div class="value"><span id="w-sound">--</span><span class="unit">dB</span></div>
         </div>
+        <div class="stat">
+          <div class="label">Ostatni pomiar</div>
+          <div class="value small"><span id="w-updated">--</span></div>
+        </div>
       </div>
-      <div class="panel">
-        <div class="row"><span>Ostatni pomiar</span><strong id="w-updated">--</strong></div>
+      <!-- Wykres częstotliwości; poziome linie = granice stanów z wellbeing_detector_driver.py -->
+      <div class="chart-card">
+        <div class="chart-host" id="wellbeing-chart"></div>
+        <div class="chart-foot">
+          <!-- Zakres wykresu (czas do teraz). Średnie i zakresy: app.py -> CHART_RANGES -->
+          <div class="camera-dock chart-dock" id="wellbeing-range-dock" role="tablist" aria-label="Zakres wykresu">
+            <button class="camera-dock-btn" role="tab" data-range="12h" title="Średnia z 15 minut">12 godzin</button>
+            <button class="camera-dock-btn active" role="tab" data-range="1d" title="Średnia z 30 minut">1 dzień</button>
+            <button class="camera-dock-btn" role="tab" data-range="3d" title="Średnia z godziny">3 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="7d" title="Średnia z dnia">7 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="14d" title="Średnia z dnia">14 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="30d" title="Średnia z 3 dni">30 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="3m" title="Średnia z tygodnia">3 miesiące</button>
+            <button class="camera-dock-btn" role="tab" data-range="6m" title="Średnia z 2 tygodni">6 miesięcy</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -378,8 +443,8 @@
                 <div class="setting-control">
                   <select id="temp-range-select">
                     <option value="obecna">Obecna</option>
-                    <option value="min-24h">Min. z 24h</option>
-                    <option value="max-24h">Maks. z 24h</option>
+                    <option value="min-24h">Minimum z 24 godzin</option>
+                    <option value="max-24h">Maksimum z 24 godzin</option>
                   </select>
                 </div>
               </div>
@@ -403,8 +468,8 @@
                 <div class="setting-control">
                   <select id="humidity-range-select">
                     <option value="obecna">Obecna</option>
-                    <option value="min-24h">Min. z 24h</option>
-                    <option value="max-24h">Maks. z 24h</option>
+                    <option value="min-24h">Minimum z 24 godzin</option>
+                    <option value="max-24h">Maksimum z 24 godzin</option>
                   </select>
                 </div>
               </div>
@@ -428,8 +493,8 @@
                 <div class="setting-control">
                   <select id="pressure-range-select">
                     <option value="obecna">Obecna</option>
-                    <option value="min-24h">Min. z 24h</option>
-                    <option value="max-24h">Maks. z 24h</option>
+                    <option value="min-24h">Minimum z 24 godzin</option>
+                    <option value="max-24h">Maksimum z 24 godzin</option>
                   </select>
                 </div>
               </div>
@@ -463,9 +528,12 @@
 
           <!-- DZIAŁANIE -->
           <div id="settings-operation" class="settings-panel">
+            <!-- Dwie kolumny na szerokich ekranach (żeby zmieściło się na 1024×600), jedna na telefonie -->
+            <div class="settings-cols">
+            <div class="settings-col">
             <div class="setting-group">
               <div class="setting-group-title">Zapisy i odczyty</div>
-              <div class="setting-row">
+              <div class="setting-row" data-admin>
                 <div>
                   <div class="setting-label">Interwał zapisu danych</div>
                   <div class="setting-desc">Jak często zapisywać dane do historii (wykresy)?</div>
@@ -481,7 +549,7 @@
                   </select>
                 </div>
               </div>
-              <div class="setting-row">
+              <div class="setting-row" data-admin>
                 <div>
                   <div class="setting-label">Długość przetrzymywania danych</div>
                   <div class="setting-desc">Po jakim czasie najstarsze dane mają być usuwane?</div>
@@ -496,7 +564,7 @@
                   </select>
                 </div>
               </div>
-              <div class="setting-row">
+              <div class="setting-row" data-admin>
                 <div>
                   <div class="setting-label">Zapisuj tempo rozładowania dokarmiaczki</div>
                   <div class="setting-desc">Pomaga oszacować, kiedy uzupełnić pokarm.</div>
@@ -508,11 +576,20 @@
                   </label>
                 </div>
               </div>
+              <div class="setting-row" data-admin>
+                <div>
+                  <div class="setting-label">Wymaż zapisane dane</div>
+                  <div class="setting-desc">Wyczyść trwale zapisane dane nt. atmosfery i samopoczucia</div>
+                </div>
+                <div class="setting-control">
+                  <button type="button" class="back-btn btn-wide btn-danger" id="btn-clear-history">Usuń</button>
+                </div>
+              </div>
             </div>
 
             <div class="setting-group">
               <div class="setting-group-title">Informowanie</div>
-              <div class="setting-row">
+              <div class="setting-row" data-admin>
                 <div>
                   <div class="setting-label">Alarmuj o napełnieniu dokarmiaczki</div>
                   <div class="setting-desc">Włącza dźwięk i popup na 15 sekund po napełnieniu.</div>
@@ -526,14 +603,83 @@
               </div>
             </div>
 
+            </div>
+            <div class="settings-col">
+
+            <!-- data-admin: na wyświetlaczu klik prosi o PIN, na telefonie użytkownika – wyszarzone.
+                 data-admin="telefon": PIN-u nie wymaga wyświetlacz (tam zmiana PIN-u wymaga Klucza albo starego PIN-u).
+                 data-only: gdzie wiersz w ogóle widać. -->
+            <div class="setting-group" id="security-group">
+              <div class="setting-group-title">Bezpieczeństwo</div>
+              <div class="setting-row" data-admin data-only="wyswietlacz">
+                <div>
+                  <div class="setting-label">Sparuj urządzenie</div>
+                  <div class="setting-desc">Połącz telefon lub komputer z ulem kodem QR albo 6 cyframi.</div>
+                </div>
+                <div class="setting-control">
+                  <button type="button" class="back-btn btn-wide" id="btn-pair">Sparuj</button>
+                </div>
+              </div>
+              <div class="setting-row" data-admin>
+                <div>
+                  <div class="setting-label">Urządzenia</div>
+                  <div class="setting-desc">Zapamiętane telefony i komputery oraz ich uprawnienia.</div>
+                </div>
+                <div class="setting-control">
+                  <button type="button" class="back-btn btn-wide" id="btn-devices">Pokaż</button>
+                </div>
+              </div>
+              <div class="setting-row" data-admin="telefon">
+                <div>
+                  <div class="setting-label">PIN administratora</div>
+                  <div class="setting-desc">Zmień 6-cyfrowy PIN, którym odblokowuje się panel ula.</div>
+                </div>
+                <div class="setting-control">
+                  <button type="button" class="back-btn btn-wide" id="btn-pin">Zmień</button>
+                </div>
+              </div>
+              <div class="setting-row" data-admin data-only="wyswietlacz">
+                <div>
+                  <div class="setting-label">Klucz</div>
+                  <div class="setting-desc">Pendrive, który zastępuje PIN administratora.</div>
+                </div>
+                <div class="setting-control">
+                  <button type="button" class="back-btn btn-wide" id="btn-key">Zarządzaj</button>
+                </div>
+              </div>
+              <div class="setting-row" data-only="telefon">
+                <div>
+                  <div class="setting-label">Odłącz od ula</div>
+                  <div class="setting-desc">To urządzenie straci dostęp; powrót wymaga ponownego parowania.</div>
+                </div>
+                <div class="setting-control">
+                  <button type="button" class="back-btn btn-wide btn-danger" id="btn-leave">Odłącz</button>
+                </div>
+              </div>
+            </div>
+
             <div class="setting-group">
               <div class="setting-group-title">Zasilanie</div>
-              <div class="setting-row" style="border:none;">
-                <div class="setting-control btn-row">
-                  <button type="button" class="back-btn btn-wide" id="btn-reboot">Uruchom Ponownie</button>
+              <div class="setting-row" data-admin>
+                <div>
+                  <div class="setting-label">Uruchom ponownie</div>
+                  <div class="setting-desc">Ul na około minutę przestanie odpowiadać.</div>
+                </div>
+                <div class="setting-control">
+                  <button type="button" class="back-btn btn-wide" id="btn-reboot">Uruchom</button>
+                </div>
+              </div>
+              <div class="setting-row" data-admin>
+                <div>
+                  <div class="setting-label">Wyłącz urządzenie</div>
+                  <div class="setting-desc">Ponowne włączenie wymaga odłączenia i podłączenia zasilania.</div>
+                </div>
+                <div class="setting-control">
                   <button type="button" class="back-btn btn-wide btn-danger" id="btn-shutdown">Wyłącz</button>
                 </div>
               </div>
+            </div>
+            </div>
             </div>
           </div>
 
@@ -552,12 +698,6 @@
                 </div>
                 <div class="setting-control">
                   <div class="bar memory-bar"><i id="memory-bar-fill"></i></div>
-                </div>
-              </div>
-              <div class="setting-row" style="border:none; margin-top:10px;">
-                <div class="setting-control" style="width:100%;">
-                  <button type="button" class="back-btn btn-wide btn-primary" id="btn-update">Sprawdź aktualizacje i
-                    wykonaj</button>
                 </div>
               </div>
             </div>
@@ -583,6 +723,7 @@
         </span>
         <span class="toggle-switch"><input type="checkbox" id="modal-option-check"><span class="slider"></span></span>
       </label>
+      <div class="modal-extra" id="modal-extra" hidden></div>
       <div class="modal-spinner" id="modal-spinner" hidden></div>
       <div class="modal-actions" id="modal-actions"></div>
     </div>
@@ -594,6 +735,90 @@
     <button type="button" class="popup-close" id="popup-close" aria-label="Zamknij">✕</button>
   </div>
 
+  <!-- PIN administratora: własny numpad, zatwierdza się sam po ostatniej cyfrze -->
+  <div class="modal pin-modal" id="pin-modal">
+    <div class="modal-backdrop" id="pin-backdrop"></div>
+    <div class="modal-card pin-card" role="dialog" aria-modal="true" aria-labelledby="pin-title" aria-describedby="pin-text">
+      <div class="ico modal-icon"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+      <h2 id="pin-title">Podaj PIN administratora</h2>
+      <p id="pin-text"></p>
+      <div class="pin-dots" id="pin-dots" aria-hidden="true"></div>
+      <div class="pin-error" id="pin-error" aria-live="polite"></div>
+      <div class="pin-pad" id="pin-pad">
+        <button type="button" data-key="1">1</button><button type="button" data-key="2">2</button><button type="button" data-key="3">3</button>
+        <button type="button" data-key="4">4</button><button type="button" data-key="5">5</button><button type="button" data-key="6">6</button>
+        <button type="button" data-key="7">7</button><button type="button" data-key="8">8</button><button type="button" data-key="9">9</button>
+        <button type="button" data-key="anuluj" class="pin-side">Anuluj</button>
+        <button type="button" data-key="0">0</button>
+        <button type="button" data-key="usun" class="pin-side" aria-label="Usuń ostatnią cyfrę">
+          <svg viewBox="0 0 24 24"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Blokada po 5 błędnych PIN-ach: na wyświetlaczu i telefonach użytkowników nie da się jej zamknąć -->
+  <div class="lockout" id="lockout" hidden role="alertdialog" aria-modal="true" aria-labelledby="lockout-title" aria-describedby="lockout-text">
+    <div class="lockout-card">
+      <div class="lockout-icon">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="7" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </div>
+      <h2 id="lockout-title">Panel zablokowany</h2>
+      <p id="lockout-text">Pięć razy wpisano błędny PIN administratora. Ul odblokuje się sam za:</p>
+      <div class="lockout-timer" id="lockout-timer">05:00:00</div>
+      <div class="modal-actions" id="lockout-actions" hidden>
+        <button type="button" class="modal-btn ghost" id="lockout-hide">Ukryj</button>
+        <button type="button" class="modal-btn primary" id="lockout-lift">Zdejmij blokadę</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Urządzenia: panel wysuwany od prawej -->
+  <div class="side-panel" id="devices-panel">
+    <div class="side-backdrop" id="devices-backdrop"></div>
+    <aside class="side-card" role="dialog" aria-modal="true" aria-labelledby="devices-title">
+      <div class="side-head">
+        <div>
+          <h2 id="devices-title">Urządzenia</h2>
+          <div class="setting-desc">Zapamiętane telefony i komputery sparowane z ulem.</div>
+        </div>
+        <button type="button" class="icon-btn" id="devices-close" aria-label="Zamknij listę urządzeń">
+          <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" /></svg>
+        </button>
+      </div>
+      <ul class="device-list" id="device-list"></ul>
+    </aside>
+  </div>
+
+  <!-- Niesparowany telefon widzi tylko to -->
+  <div class="pair-screen" id="pair-screen" hidden>
+    <div class="pair-card">
+      <div class="logo">BEE<span>NEST</span></div>
+      <h1 id="pair-title">Sparuj to urządzenie z ulem</h1>
+      <p class="lead" id="pair-lead">Na wyświetlaczu ula otwórz Ustawienia → Działanie → Sparuj urządzenie, a potem zeskanuj kod QR albo wpisz 6 cyfr.</p>
+      <form id="pair-form" autocomplete="off">
+        <label class="pair-field">
+          <span class="setting-label">Nazwa tego urządzenia</span>
+          <input type="text" id="pair-name" maxlength="40" required>
+        </label>
+        <label class="pair-field" id="pair-code-field">
+          <span class="setting-label">Kod z wyświetlacza</span>
+          <input type="text" id="pair-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code">
+        </label>
+        <div class="pin-error" id="pair-error" aria-live="polite"></div>
+        <button type="submit" class="modal-btn primary" id="pair-submit">Sparuj</button>
+      </form>
+      <div class="pair-wait" id="pair-wait" hidden>
+        <div class="modal-spinner"></div>
+        <p class="lead">Czekam na zatwierdzenie na wyświetlaczu ula…</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ustawienia tego urządzenia z data/global.conf i stan zabezpieczeń -->
+  <script>window.BEENEST_DEVICE = {{ device|tojson }}; window.BEENEST_AUTH = {{ auth|tojson }};</script>
+  <script src="{{ url_for('static', filename='qr.js') }}"></script>
+  <script src="{{ url_for('static', filename='chart.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 

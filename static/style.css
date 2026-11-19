@@ -13,6 +13,14 @@
   display: none !important;
 }
 
+/* Przyciski i pola nie dziedziczą czcionki same z siebie – bez tego mają systemową */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
 /* bez tego atrybut hidden przegrywa z display:flex */
 
 :root {
@@ -30,16 +38,28 @@
   --shadow: 0 4px 20px rgba(15, 15, 16, .04);
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
-  /* ===== ANIMACJE – tu dostosujesz płynność ===== */
+  /* ===== ANIMACJE i WYKRESY – wartości ustawiasz w data/global.conf, sekcja [wyglad].
+     Te poniżej to tylko zapas, gdy strona jest otwarta bez serwera. ===== */
   --anim-duration: .4s;
   /* czas: przełącznik kamer/kategorii, listy, okna (większy = wolniej) */
   --anim-ease: cubic-bezier(.32, .72, 0, 1);
   /* krzywa; inne pomysły: ease-in-out | cubic-bezier(.34,1.56,.64,1) = sprężyna z lekkim "odbiciem" */
+
+  --chart-grow-duration: 1.2s;
+  /* wejście na zakładkę: linia wstaje z osi X i powoli wygina się w kształt danych */
+  --chart-zoom-duration: .65s;
+  /* zmiana zakresu w docku, przybliżenie kliknięciem, zmiana parametru */
+  --chart-ease: cubic-bezier(.45, 0, .2, 1);
+  /* krzywa wykresów; wpisz var(--anim-ease), żeby była taka sama jak reszta strony */
+  --chart-grid-size: 24px;
+  /* oczko kratki w tle wykresu (stały odstęp, niezależny od skali) */
 }
 
 @media (prefers-reduced-motion: reduce) {
   :root {
     --anim-duration: .01s;
+    --chart-grow-duration: .01s;
+    --chart-zoom-duration: .01s;
   }
 }
 
@@ -47,7 +67,7 @@
 
 /* Zmienne zależne od motywu liczone na <body>, żeby widziały jego kolor akcentu */
 body {
-  /* ===== HOVER KART w Menu Głównym – tu wzmocnisz podświetlenie ===== */
+  /* ===== HOVER KART w Menu Głównym – ustawiasz w data/global.conf, [wyglad]; tu tylko zapas ===== */
   --hover-lift: -4px;
   /* o ile karta unosi się w górę (0 = wcale) */
   --hover-glow: 0 14px 36px color-mix(in srgb, var(--orange) 32%, transparent);
@@ -985,8 +1005,7 @@ body[data-contrast="high"] .camera-dock-btn.active {
   padding: 8px 12px 8px 16px;
   border-radius: 999px;
   cursor: pointer;
-  font: 800 13.5px/1.4 inherit;
-  font-family: inherit;
+  font: 800 13.5px/1.4 var(--font);
   color: var(--black);
   background: var(--dock-bg);
   border: 1px solid var(--dock-border);
@@ -1064,8 +1083,7 @@ body[data-contrast="high"] .camera-dock-btn.active {
   cursor: pointer;
   padding: 8px 16px;
   border-radius: 999px;
-  font: 800 13.5px/1.4 inherit;
-  font-family: inherit;
+  font: 800 13.5px/1.4 var(--font);
   color: var(--black);
   transition: background .2s, color .2s;
 }
@@ -1144,13 +1162,13 @@ input:focus-visible+.slider {
   display: grid;
   place-items: center;
   padding: 20px;
-  opacity: 0;
   visibility: hidden;
-  transition: opacity var(--anim-duration) var(--anim-ease), visibility 0s linear var(--anim-duration);
+  transition: visibility 0s linear var(--anim-duration);
 }
 
+/* Przezroczystość animują same rozmywane elementy (tło i karta), nie całe okno: przy przezroczystym
+   rodzicu przeglądarka włącza backdrop-filter dopiero po animacji i rozmycie wskakuje nagle. */
 .modal.open {
-  opacity: 1;
   visibility: visible;
   transition-delay: 0s;
 }
@@ -1161,6 +1179,12 @@ input:focus-visible+.slider {
   background: rgba(12, 12, 14, .34);
   -webkit-backdrop-filter: blur(14px) saturate(120%);
   backdrop-filter: blur(14px) saturate(120%);
+  opacity: 0;
+  transition: opacity var(--anim-duration) var(--anim-ease);
+}
+
+.modal.open .modal-backdrop {
+  opacity: 1;
 }
 
 .modal-card {
@@ -1178,11 +1202,13 @@ input:focus-visible+.slider {
   border: 1px solid var(--dock-border);
   box-shadow: 0 24px 70px rgba(0, 0, 0, .30), 0 0 0 1px color-mix(in srgb, var(--orange) 22%, transparent), inset 0 1px 0 rgba(255, 255, 255, .3);
   transform: translateY(16px) scale(.95);
-  transition: transform var(--anim-duration) var(--anim-ease);
+  opacity: 0;
+  transition: transform var(--anim-duration) var(--anim-ease), opacity var(--anim-duration) var(--anim-ease);
 }
 
 .modal.open .modal-card {
   transform: none;
+  opacity: 1;
 }
 
 .modal-icon {
@@ -1207,6 +1233,13 @@ input:focus-visible+.slider {
   font-size: 14.5px;
   color: var(--muted);
   font-weight: 600;
+  white-space: pre-line;   /* "\n" w tekście okna = nowa linijka */
+}
+
+.modal-card p em {
+  font-style: italic;
+  font-weight: 800;
+  color: var(--text);
 }
 
 .modal-option {
@@ -1244,8 +1277,7 @@ input:focus-visible+.slider {
   border: none;
   border-radius: 999px;
   cursor: pointer;
-  font: 800 14px/1.2 inherit;
-  font-family: inherit;
+  font: 800 14px/1.2 var(--font);
   transition: filter .2s, transform .15s;
 }
 
@@ -1309,37 +1341,102 @@ body[data-contrast="high"] .modal-btn.primary {
   background: var(--orange);
 }
 
-/* ---------- STRONA ATMOSFERA: tabela parametr x (w ulu / na zewnątrz), każda komórka = wartość + min/maks z 24 h ---------- */
-.atmo-table {
-  display: grid;
-  grid-template-columns: 120px 1fr 1fr;
-  gap: 12px 14px;
-  align-items: stretch;
+/* ---------- ZAKŁADKI Z WYKRESEM (Atmosfera, Samopoczucie): nagłówek, pasek odczytów, karta wykresu ---------- */
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
 }
 
-.atmo-head {
+.page-head .back-btn {
+  margin-bottom: 0;
+  align-self: center;
+}
+
+.page-head h1 {
+  margin: 0;
+}
+
+/* Atmosfera: 3 grupy (temperatura / wilgotność / ciśnienie) x (w ulu / na zewnątrz) */
+.atmo-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.atmo-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  cursor: pointer;
+  border-radius: 18px;
+  outline: none;
+}
+
+.atmo-group-title {
+  padding-left: 4px;
   font-size: 12px;
   font-weight: 800;
   letter-spacing: .6px;
   text-transform: uppercase;
   color: var(--muted);
+  transition: color var(--anim-duration) var(--anim-ease);
 }
 
-.atmo-param {
-  align-self: center;
-  font-size: 15px;
-  font-weight: 800;
+.atmo-group-title span {
+  font-weight: 700;
+  opacity: .7;
+}
+
+.atmo-group.is-selected .atmo-group-title {
+  color: var(--orange);
+}
+
+.atmo-group:focus-visible .atmo-group-cells {
+  outline: 2px solid var(--orange);
+  outline-offset: 3px;
+  border-radius: 18px;
+}
+
+.atmo-group-cells {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.atmo-cell {
+  min-width: 0;
+  padding: 10px 14px;
+  border-radius: 16px;
+}
+
+.atmo-group:hover .atmo-cell {
+  border-color: var(--orange);
+}
+
+.atmo-cell .label {
+  font-size: 11px;
 }
 
 .atmo-cell .value {
-  margin-top: 0;
+  margin-top: 2px;
+  font-size: clamp(20px, 2.4vw, 28px);
+  white-space: nowrap;
 }
 
 .atmo-range {
-  margin-top: 6px;
-  font-size: 13px;
+  margin-top: 3px;
+  font-size: 11.5px;
   font-weight: 700;
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .atmo-range span {
@@ -1347,21 +1444,340 @@ body[data-contrast="high"] .modal-btn.primary {
   font-weight: 800;
 }
 
-.atmo-range .unit-s {
-  color: var(--muted);
-  font-weight: 700;
-}
-
 .stat.primary .atmo-range,
-.stat.primary .atmo-range span,
-.stat.primary .atmo-range .unit-s {
+.stat.primary .atmo-range span {
   color: rgba(255, 255, 255, .9);
 }
 
 body[data-contrast="high"] .stat.primary .atmo-range,
-body[data-contrast="high"] .stat.primary .atmo-range span,
-body[data-contrast="high"] .stat.primary .atmo-range .unit-s {
+body[data-contrast="high"] .stat.primary .atmo-range span {
   color: var(--bg);
+}
+
+/* Samopoczucie: 4 kafelki w jednym rzędzie */
+.stats.stats-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.stats-strip .stat {
+  padding: 12px 16px;
+}
+
+.stats-strip .value {
+  font-size: clamp(22px, 2.6vw, 30px);
+}
+
+/* Karta wykresu: wypełnia resztę wysokości; na dole docki (zakres po lewej, parametr po prawej) */
+.page-chart.active {
+  min-height: 0;
+}
+
+.chart-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--card-background);
+  box-shadow: var(--shadow);
+}
+
+.chart-host {
+  flex: 1;
+  min-height: 170px;
+}
+
+.chart-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.camera-dock.chart-dock {
+  margin: 0;
+  padding: 4px;
+  align-self: auto;
+  max-width: 100%;
+}
+
+.chart-dock .camera-dock-btn {
+  padding: 6px 11px;
+  font-size: 12.5px;
+}
+
+/* --- sam wykres (static/chart.js) --- */
+.chart {
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  cursor: zoom-in;
+  /* kolory linii; s0 = w ulu / główna, s1 = na zewnątrz */
+  --chart-s0: var(--orange);
+  --chart-s1: color-mix(in srgb, var(--black) 55%, transparent);
+  --chart-grid: color-mix(in srgb, var(--black) 6%, transparent);
+}
+
+.chart.is-empty {
+  cursor: default;
+}
+
+.chart-grid {
+  position: absolute;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--chart-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--chart-grid) 1px, transparent 1px);
+  background-size: var(--chart-grid-size) var(--chart-grid-size);
+  background-position: -1px -1px;
+  border-radius: 6px;
+}
+
+.chart-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.chart-line {
+  fill: none;
+  stroke-width: 2.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart-line.s0 {
+  stroke: var(--chart-s0);
+}
+
+.chart-line.s1 {
+  stroke: var(--chart-s1);
+  stroke-width: 2;
+}
+
+.chart-grad-top {
+  stop-color: var(--chart-s0);
+  stop-opacity: .28;
+}
+
+.chart-grad-bottom {
+  stop-color: var(--chart-s0);
+  stop-opacity: 0;
+}
+
+.chart-axis text {
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 700;
+  fill: var(--muted);
+}
+
+.chart-axis text.major {
+  fill: var(--black);
+  font-weight: 800;
+}
+
+.chart-tick {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.chart-base {
+  stroke: color-mix(in srgb, var(--black) 25%, transparent);
+  stroke-width: 1.2;
+}
+
+/* granice stanów samopoczucia */
+.chart-bands line {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 4 5;
+  opacity: .6;
+}
+
+.chart-bands text {
+  paint-order: stroke;
+  stroke: var(--card-background);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  font-family: var(--font);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  fill: var(--muted);
+  opacity: .85;
+}
+
+.chart-hover {
+  opacity: 0;
+  transition: opacity .15s;
+  pointer-events: none;
+}
+
+.chart-hover.show {
+  opacity: 1;
+}
+
+.chart-hover line {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.chart-dot {
+  fill: var(--card-background);
+  stroke-width: 2.5;
+}
+
+.chart-dot.s0 {
+  stroke: var(--chart-s0);
+}
+
+.chart-dot.s1 {
+  stroke: var(--chart-s1);
+}
+
+/* dymek, legenda, podpowiedź – szkło jak dock */
+.chart-tip,
+.chart-hint {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid var(--dock-border);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .12);
+}
+
+.chart-tip {
+  top: 2px;
+  z-index: 2;
+  min-width: 140px;
+  padding: 7px 11px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity .15s, transform .15s;
+}
+
+.chart-tip.show {
+  opacity: 1;
+  transform: none;
+}
+
+.chart-tip-when {
+  font-weight: 800;
+  margin-bottom: 3px;
+}
+
+.chart-tip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.chart-tip-row b {
+  color: var(--black);
+}
+
+.chart-tip-row.s0 b {
+  color: var(--orange);
+}
+
+.chart-tip-avg {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.chart-legend {
+  position: absolute;
+  top: 6px;
+  left: 14px;
+  display: flex;
+  gap: 14px;
+  pointer-events: none;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.chart-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-key::before {
+  content: "";
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--chart-s0);
+}
+
+.chart-key.s1::before {
+  background: var(--chart-s1);
+}
+
+.chart-hint {
+  top: 2px;
+  right: 54px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--muted);
+  opacity: 0;
+  transform: scale(.9);
+  transition: opacity var(--anim-duration) var(--anim-ease), transform var(--anim-duration) var(--anim-ease);
+}
+
+.chart.is-zoomed .chart-hint {
+  opacity: 1;
+  transform: none;
+}
+
+.chart-empty {
+  position: absolute;
+  inset: 30px 54px 26px 12px;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  text-align: center;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--muted);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .3s;
+}
+
+.chart.is-empty .chart-empty {
+  opacity: 1;
+}
+
+body[data-contrast="high"] .chart {
+  --chart-s1: var(--black);
+  --chart-grid: color-mix(in srgb, var(--black) 12%, transparent);
+}
+
+body[data-contrast="high"] .chart-line {
+  stroke-width: 3;
 }
 
 /* ---------- PASEK STRONY (Wróć + dock w jednej linii) ---------- */
@@ -1617,12 +2033,13 @@ body[data-contrast="high"] .stat.primary .atmo-range .unit-s {
     margin-bottom: 14px;
   }
 
-  .atmo-table {
-    gap: 10px 14px;
+  .atmo-strip,
+  .stats.stats-strip {
+    margin-bottom: 10px;
   }
 
-  .atmo-cell {
-    padding: 12px 18px;
+  .page-head {
+    margin-bottom: 10px;
   }
 }
 
@@ -1695,17 +2112,36 @@ body[data-contrast="high"] .stat.primary .atmo-range .unit-s {
     justify-content: center;
   }
 
-  .atmo-table {
+  .page-head {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .atmo-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .stats.stats-strip {
     grid-template-columns: 1fr 1fr;
   }
 
-  .atmo-head:first-child {
-    display: none;
+  .chart-card {
+    flex: none;
   }
 
-  .atmo-param {
-    grid-column: 1 / -1;
-    margin-top: 6px;
+  .chart-host {
+    flex: none;
+    height: 260px;
+  }
+
+  .chart-foot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .camera-dock.chart-dock {
+    justify-content: flex-start;
+    overflow-x: auto;
   }
 
   .settings-container {
@@ -1749,5 +2185,671 @@ body[data-contrast="high"] .stat.primary .atmo-range .unit-s {
 
   .monitor-side .stats {
     grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  }
+}
+/* =====================================================
+   ZABEZPIECZENIA: kłódka w pasku, PIN, blokada, parowanie, urządzenia, kody QR
+   ===================================================== */
+/* Ustawienia → Działanie: dwie kolumny na szerokich ekranach */
+@media (min-width: 851px) {
+  .settings-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 26px;
+    align-items: start;
+  }
+
+  .settings-cols .setting-row {
+    gap: 12px;
+  }
+
+  .settings-cols .dd-trigger {
+    min-width: 0;            /* lista tak szeroka jak jej tekst – podpis ma więcej miejsca */
+    gap: 8px;
+    padding-left: 13px;
+  }
+
+  .settings-col .setting-group:last-child {
+    margin-bottom: 0;
+  }
+}
+
+/* Kłódka na środku paska: logo | kłódka | zegar */
+@media (min-width: 851px) {
+  .topbar {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+  }
+
+  .topbar .logo {
+    grid-column: 1;
+    justify-self: start;
+  }
+
+  .topbar .lock-btn {
+    grid-column: 2;
+  }
+
+  .topbar .datetime {
+    grid-column: 3;
+    justify-self: end;
+  }
+}
+
+/* Kłódka (tylko wyświetlacz): Odblokuj Panel / Zahasłuj Panel / Klucz zainstalowany w USB */
+.lock-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px 7px 11px;
+  border: none;
+  border-radius: 999px;
+  background: var(--orange-soft);
+  color: var(--orange-dark);
+  font: 800 14px/1.2 var(--font);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .2s, color .2s, filter .2s;
+}
+
+.lock-btn:hover {
+  filter: brightness(.95);
+}
+
+.lock-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lock-btn[data-mode="pin"],
+.lock-btn[data-mode="klucz"] {
+  background: var(--orange);
+  color: #fff;
+}
+
+body[data-contrast="high"] .lock-btn[data-mode="pin"],
+body[data-contrast="high"] .lock-btn[data-mode="klucz"] {
+  color: var(--bg);
+}
+
+.lock-btn:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+
+/* Opcja administratora na telefonie użytkownika */
+.is-denied {
+  opacity: .45;
+  filter: grayscale(.7);
+}
+
+.is-denied button,
+.is-denied label,
+.is-denied .dd-trigger,
+button.is-denied {
+  cursor: not-allowed;
+}
+
+/* Okno: dodatkowa treść (kod QR, przełączniki) i szersza wersja */
+.modal-card.is-wide {
+  width: min(100%, 560px);
+}
+
+.modal-extra {
+  width: 100%;
+}
+
+.modal-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-toggles .modal-option {
+  margin-top: 0;
+}
+
+.modal-option .toggle-switch {
+  flex-shrink: 0;      /* długi opis nie ściska przełącznika */
+}
+
+/* ---------- PIN ---------- */
+.pin-modal {
+  z-index: 210;
+}
+
+.pin-card {
+  width: min(100%, 340px);
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+}
+
+.pin-card p {
+  margin-top: -4px;
+}
+
+.pin-card.is-busy .pin-pad {
+  opacity: .5;
+  pointer-events: none;
+}
+
+.pin-card.shake {
+  animation: pin-shake .4s ease;
+}
+
+@keyframes pin-shake {
+  20%, 60% { transform: translateX(-9px); }
+  40%, 80% { transform: translateX(9px); }
+}
+
+.pin-dots {
+  display: flex;
+  gap: 12px;
+  margin: 4px 0 2px;
+}
+
+.pin-dots i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--orange);
+  transition: background .15s, transform .15s;
+}
+
+.pin-dots i.on {
+  background: var(--orange);
+  transform: scale(1.1);
+}
+
+.pin-error {
+  min-height: 18px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #D32F2F;
+}
+
+.pin-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+
+.pin-pad button {
+  height: 56px;
+  border: none;
+  border-radius: 18px;
+  background: var(--orange-soft);
+  color: var(--black);
+  font: 800 22px/1 var(--font);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: filter .15s, transform .1s;
+}
+
+.pin-pad button:hover {
+  filter: brightness(.95);
+}
+
+.pin-pad button:active {
+  transform: scale(.95);
+}
+
+.pin-pad button:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+
+.pin-pad .pin-side {
+  background: transparent;
+  color: var(--orange-dark);
+  font-size: 14px;
+}
+
+.pin-pad svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---------- BLOKADA po błędnych PIN-ach ---------- */
+.lockout {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  backdrop-filter: blur(24px) saturate(140%);
+  animation: lockout-in var(--anim-duration) var(--anim-ease) both;
+}
+
+@keyframes lockout-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Cały ekran: bez karty, wszystko wyśrodkowane */
+.lockout-card {
+  width: min(100%, 640px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+}
+
+.lockout-icon {
+  display: grid;
+  place-items: center;
+}
+
+.lockout-icon svg {
+  width: min(34vh, 60vw);
+  height: min(34vh, 60vw);
+  fill: none;
+  stroke: var(--orange);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lockout-card h2 {
+  font-size: clamp(26px, 4vw, 38px);
+  font-weight: 900;
+  letter-spacing: -.5px;
+}
+
+.lockout-card p {
+  color: var(--muted);
+  font-size: clamp(15px, 1.8vw, 18px);
+  max-width: 480px;
+}
+
+.lockout-timer {
+  font-size: clamp(48px, 10vw, 84px);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1px;
+  color: var(--orange);
+  line-height: 1.1;
+}
+
+/* ---------- KODY QR (barwy motywu) ---------- */
+.qr-box {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+}
+
+.qr-frame {
+  flex: 0 0 auto;
+  width: 210px;
+  padding: 6px;
+  border-radius: 20px;
+  background: var(--card-background);
+  border: 3px solid var(--orange);
+}
+
+.qr {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+}
+
+/* Moduły w barwie akcentu, przyciemnionej, a tło zawsze jasne z odcieniem akcentu: aparaty telefonów
+   (i zbarimg) słabo czytają kod odwrócony – jasny na ciemnym – więc w ciemnych motywach też jest jasne pole.
+   Sprawdzone odczytem dla wszystkich motywów; kontrast od 4,2 do 7,8. */
+.qr-bg {
+  fill: color-mix(in srgb, var(--orange) 6%, #fff);
+}
+
+.qr-dot {
+  fill: color-mix(in srgb, var(--orange) 60%, #000);
+}
+
+body[data-contrast="high"] .qr-bg {
+  fill: #fff;
+}
+
+body[data-contrast="high"] .qr-dot {
+  fill: #000;      /* w Nocnej Czerni akcent jest biały – przyciemniony dałby za słaby kontrast */
+}
+
+.qr-info {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.qr-line {
+  display: flex;
+  flex-direction: column;
+}
+
+.qr-line strong {
+  font-size: 17px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.qr-line strong.pair-digits {
+  font-size: 32px;
+  letter-spacing: 3px;
+  color: var(--orange);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- URZĄDZENIA: panel od prawej ---------- */
+.side-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  visibility: hidden;
+  transition: visibility 0s linear var(--anim-duration);
+}
+
+.side-panel.open {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.side-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(12, 12, 14, .34);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  backdrop-filter: blur(14px) saturate(120%);
+  opacity: 0;
+  transition: opacity var(--anim-duration) var(--anim-ease);
+}
+
+.side-panel.open .side-backdrop {
+  opacity: 1;
+}
+
+.side-card {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: min(50vw, 640px);
+  min-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  border-radius: 25px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--dock-border);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .30), 0 0 0 1px color-mix(in srgb, var(--orange) 22%, transparent);
+  transform: translateX(calc(100% + 24px));
+  transition: transform var(--anim-duration) var(--anim-ease);
+}
+
+.side-panel.open .side-card {
+  transform: none;
+}
+
+.side-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.side-head h2 {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -.5px;
+}
+
+.icon-btn {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--orange-soft);
+  color: var(--orange-dark);
+  cursor: pointer;
+  transition: filter .2s, transform .1s;
+}
+
+.icon-btn:hover {
+  filter: brightness(.95);
+}
+
+.icon-btn:active {
+  transform: scale(.94);
+}
+
+.icon-btn:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-btn.trash-btn {
+  background: #FFEAEA;
+  color: #D32F2F;
+}
+
+.device-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: var(--card-background);
+  border: 1px solid var(--line);
+}
+
+.device-row .ico {
+  background: var(--line);
+  color: var(--muted);
+}
+
+.device-row.is-admin .ico {
+  background: var(--orange-soft);
+  color: var(--orange);
+}
+
+.device-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.device-text .setting-label {
+  overflow-wrap: anywhere;
+}
+
+.device-empty {
+  color: var(--muted);
+  font-size: 14px;
+  padding: 10px 2px;
+}
+
+/* ---------- EKRAN PAROWANIA (niesparowany telefon) ---------- */
+.pair-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  grid-template-columns: minmax(0, 440px);   /* bez tego długi tekst rozpycha kartę poza ekran telefonu */
+  justify-content: center;
+  align-content: center;
+  padding: 20px 16px;
+  background: var(--bg);
+  overflow-y: auto;
+}
+
+.pair-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pair-card .logo {
+  margin-bottom: 10px;
+}
+
+.pair-card h1 {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: -.5px;
+  line-height: 1.2;
+}
+
+.pair-card .lead {
+  margin-bottom: 0;
+}
+
+#pair-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pair-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pair-field input {
+  padding: 12px 16px;
+  border-radius: 16px;
+  border: 2px solid var(--line);
+  background: var(--card-background);
+  color: var(--black);
+  font: 700 17px/1.2 var(--font);
+}
+
+.pair-field input:focus {
+  outline: none;
+  border-color: var(--orange);
+}
+
+#pair-code {
+  font-size: 26px;
+  letter-spacing: 8px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+#pair-submit {
+  padding: 14px 18px;
+  font-size: 16px;
+}
+
+.pair-wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+@media (max-width: 850px) {
+  .side-card {
+    top: 8px;
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    width: auto;
+    min-width: 0;
+    padding: 18px;
+  }
+
+  .qr-box {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .qr-frame {
+    width: min(100%, 230px);
+    align-self: center;
+  }
+}
+
+/* Niski ekran (1024×600): mniejszy kod QR i numpad, żeby okna mieściły się bez przewijania */
+@media (max-height: 720px) {
+  .qr-frame {
+    width: 180px;
+  }
+
+  .pin-pad button {
+    height: 46px;
+  }
+
+  .pin-card {
+    gap: 6px;
+    padding: 20px 24px;
+  }
+
+  .pin-card .modal-icon {
+    display: none;
+  }
+}
+
+/* Niski ekran: Działanie (z grupą Bezpieczeństwo) mieści się bez przewijania */
+@media (min-width: 851px) and (max-height: 720px) {
+  .settings-content {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .setting-group:last-child {
+    margin-bottom: 0;
+  }
+}
+
+@media (min-width: 851px) and (max-height: 720px) {
+  .settings-cols .setting-row {
+    padding-top: 7px;
+    padding-bottom: 7px;
   }
 }

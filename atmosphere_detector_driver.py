@@ -11,9 +11,9 @@ Zasady (takie same we wszystkich *_detector_driver.py):
   * KEYS wymienia wszystkie klucze, które read() zwraca.
 """
 import random
-import smbus2
+"""import smbus2
 import bme280
-
+"""""
 
 ADDRESS = 0x76   # zmień na 0x77, jeśli i2cdetect pokazał 77
 KEYS = ("temp_current", "temp_outside",
@@ -23,15 +23,15 @@ KEYS = ("temp_current", "temp_outside",
 
 def read() -> dict:
     
-    bus = smbus2.SMBus(1)
+    """bus = smbus2.SMBus(1)
     calibration = bme280.load_calibration_params(bus, ADDRESS)
-    d = bme280.sample(bus, ADDRESS, calibration)
+    d = bme280.sample(bus, ADDRESS, calibration)"""
     # TODO: tu wstaw prawdziwy odczyt (np. dwa BME280 po I2C).
     return {
         # W ulu (pierwszy BME280, adres ADDRESS)
-        "temp_current":  d.temperature,
-        "temp_humidity": d.humidity,
-        "temp_pressure": d.pressure,
+        "temp_current":  12.8 + random.uniform(-0.3, 0.3),
+        "temp_humidity": 12.8 + random.uniform(-0.3, 0.3),
+        "temp_pressure": 12.8 + random.uniform(-0.3, 0.3),
         # Na zewnątrz – na razie dane demonstracyjne. Gdy podepniesz drugi BME280 (adres 0x77),
         # odczytaj go tak samo jak powyżej (bme280.sample(bus, 0x77, calibration_out)) i wpisz:
         # temp_outside = d_out.temperature, temp_outside_humidity = d_out.humidity, temp_outside_pressure = d_out.pressure
