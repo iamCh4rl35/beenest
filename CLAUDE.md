@@ -147,8 +147,10 @@ telefon (\~390 px szerokości) i 1920×1080.
 * **Zasilanie solarne (planowanie, 2026-11-19):** panel → Victron SmartSolar MPPT 75/15 → akumulator 22 Ah → Pi.
 Odczyt przez VE.Direct (tryb tekstowy, 19200 bodów, blok co 1 s; tylko biblioteka standardowa: `termios`),
 jako nowy sterownik w stylu `*\_detector\_driver.py`. Bluetooth (Instant Readout) jest możliwy, ale wymaga
-klucza z VictronConnect i nowej biblioteki. Pytania do użytkownika: chemia akumulatora, czy Pi jest
-na wyjściu LOAD, jakim kablem jest podłączony.
+klucza z VictronConnect i nowej biblioteki. Odpowiedzi użytkownika: akumulator **żelowy MAXX 22 Ah 12 V**;
+Pi zasilane przez przetwornicę step-down do 5 V (źródło przetwornicy: wyjście LOAD czy akumulator –
+do ustalenia); połączenie „najdogodniej” → proponowany kabel VE.Direct–USB. Procent naładowania
+liczony z napięcia tylko bez ładowania (żel w spoczynku: około 12,85 V = 100 %, 11,8 V = 0 %).
 * **Zabezpieczenia — wdrożone 2026-11-19** (opis w `app.py`, sekcja „Zabezpieczenia”, i `static/app.js` sekcja 14).
   Ustalenia użytkownika, których kod nie mówi wprost:
     * Telefon administratora zmienia PIN bez starego PIN-u („brak wymogu PIN-u, zmiana hasła ula”);
