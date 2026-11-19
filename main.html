@@ -7,6 +7,8 @@
   <meta name="theme-color" content="#FF8A00">
   <title>Centrala BEENest</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <!-- [wyglad] z data/global.conf – nadpisuje wartości z style.css -->
+  <style id="conf-look">{{ look_css|safe }}</style>
 </head>
 
 <body data-theme="bialy-pylek" data-contrast="normal">
@@ -178,50 +180,90 @@
     </section>
 
     <!-- ============ TEMPERATURA ============ -->
-    <section id="temperatura" class="page">
-      <a href="#home" class="back-btn">← Wróć do panelu</a>
-      <h1>Atmosfera</h1>
-      <p class="lead">Temperatura, wilgotność i ciśnienie w ulu i na zewnątrz oraz minimum i maksimum z ostatnich 24 godzin.</p>
-      <div class="atmo-table">
-        <div class="atmo-head"></div>
-        <div class="atmo-head">W ulu</div>
-        <div class="atmo-head">Na zewnątrz</div>
-        <div class="atmo-param">Temperatura</div>
-        <div class="stat atmo-cell" id="atmo-cell-temperatura-in">
-          <div class="value"><span id="temp-current">--</span><span class="unit">°C</span></div>
-          <div class="atmo-range">min <span id="temp-min">--</span> · maks <span id="temp-max">--</span> <span class="unit-s">°C</span></div>
+    <section id="temperatura" class="page page-chart">
+      <div class="page-head">
+        <a href="#home" class="back-btn">← Wróć do panelu</a>
+        <h1>Atmosfera</h1>
+      </div>
+      <!-- Odczyty: w ulu / na zewnątrz + minimum i maksimum z 24 godzin. Kliknięcie grupy pokazuje ją na wykresie. -->
+      <div class="atmo-strip">
+        <div class="atmo-group" data-param="temperatura" role="button" tabindex="0" aria-label="Pokaż na wykresie: Temperatura">
+          <div class="atmo-group-title">Temperatura <span>· ostatnie 24 godziny</span></div>
+          <div class="atmo-group-cells">
+            <div class="stat atmo-cell" id="atmo-cell-temperatura-in">
+              <div class="label">W ulu</div>
+              <div class="value"><span id="temp-current">--</span><span class="unit">°C</span></div>
+              <div class="atmo-range">minimum <span id="temp-min">--</span> · maksimum <span id="temp-max">--</span></div>
+            </div>
+            <div class="stat atmo-cell" id="atmo-cell-temperatura-out">
+              <div class="label">Na zewnątrz</div>
+              <div class="value"><span id="temp-outside">--</span><span class="unit">°C</span></div>
+              <div class="atmo-range">minimum <span id="temp-outside-min">--</span> · maksimum <span id="temp-outside-max">--</span></div>
+            </div>
+          </div>
         </div>
-        <div class="stat atmo-cell" id="atmo-cell-temperatura-out">
-          <div class="value"><span id="temp-outside">--</span><span class="unit">°C</span></div>
-          <div class="atmo-range">min <span id="temp-outside-min">--</span> · maks <span id="temp-outside-max">--</span> <span class="unit-s">°C</span></div>
+        <div class="atmo-group" data-param="wilgoc" role="button" tabindex="0" aria-label="Pokaż na wykresie: Wilgotność">
+          <div class="atmo-group-title">Wilgotność <span>· ostatnie 24 godziny</span></div>
+          <div class="atmo-group-cells">
+            <div class="stat atmo-cell" id="atmo-cell-wilgoc-in">
+              <div class="label">W ulu</div>
+              <div class="value"><span id="temp-humidity">--</span><span class="unit">%</span></div>
+              <div class="atmo-range">minimum <span id="temp-humidity-min">--</span> · maksimum <span id="temp-humidity-max">--</span></div>
+            </div>
+            <div class="stat atmo-cell" id="atmo-cell-wilgoc-out">
+              <div class="label">Na zewnątrz</div>
+              <div class="value"><span id="temp-outside-humidity">--</span><span class="unit">%</span></div>
+              <div class="atmo-range">minimum <span id="temp-outside-humidity-min">--</span> · maksimum <span id="temp-outside-humidity-max">--</span></div>
+            </div>
+          </div>
         </div>
-        <div class="atmo-param">Wilgotność</div>
-        <div class="stat atmo-cell" id="atmo-cell-wilgoc-in">
-          <div class="value"><span id="temp-humidity">--</span><span class="unit">%</span></div>
-          <div class="atmo-range">min <span id="temp-humidity-min">--</span> · maks <span id="temp-humidity-max">--</span> <span class="unit-s">%</span></div>
+        <div class="atmo-group" data-param="cisnienie" role="button" tabindex="0" aria-label="Pokaż na wykresie: Ciśnienie">
+          <div class="atmo-group-title">Ciśnienie <span>· ostatnie 24 godziny</span></div>
+          <div class="atmo-group-cells">
+            <div class="stat atmo-cell" id="atmo-cell-cisnienie-in">
+              <div class="label">W ulu</div>
+              <div class="value"><span id="temp-pressure">--</span><span class="unit">hPa</span></div>
+              <div class="atmo-range">minimum <span id="temp-pressure-min">--</span> · maksimum <span id="temp-pressure-max">--</span></div>
+            </div>
+            <div class="stat atmo-cell" id="atmo-cell-cisnienie-out">
+              <div class="label">Na zewnątrz</div>
+              <div class="value"><span id="temp-outside-pressure">--</span><span class="unit">hPa</span></div>
+              <div class="atmo-range">minimum <span id="temp-outside-pressure-min">--</span> · maksimum <span id="temp-outside-pressure-max">--</span></div>
+            </div>
+          </div>
         </div>
-        <div class="stat atmo-cell" id="atmo-cell-wilgoc-out">
-          <div class="value"><span id="temp-outside-humidity">--</span><span class="unit">%</span></div>
-          <div class="atmo-range">min <span id="temp-outside-humidity-min">--</span> · maks <span id="temp-outside-humidity-max">--</span> <span class="unit-s">%</span></div>
-        </div>
-        <div class="atmo-param">Ciśnienie</div>
-        <div class="stat atmo-cell" id="atmo-cell-cisnienie-in">
-          <div class="value"><span id="temp-pressure">--</span><span class="unit">hPa</span></div>
-          <div class="atmo-range">min <span id="temp-pressure-min">--</span> · maks <span id="temp-pressure-max">--</span> <span class="unit-s">hPa</span></div>
-        </div>
-        <div class="stat atmo-cell" id="atmo-cell-cisnienie-out">
-          <div class="value"><span id="temp-outside-pressure">--</span><span class="unit">hPa</span></div>
-          <div class="atmo-range">min <span id="temp-outside-pressure-min">--</span> · maks <span id="temp-outside-pressure-max">--</span> <span class="unit-s">hPa</span></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-host" id="atmo-chart"></div>
+        <div class="chart-foot">
+          <!-- Zakres wykresu (czas do teraz). Średnie i zakresy: app.py -> CHART_RANGES -->
+          <div class="camera-dock chart-dock" id="atmo-range-dock" role="tablist" aria-label="Zakres wykresu">
+            <button class="camera-dock-btn" role="tab" data-range="12h" title="Średnia z 15 minut">12 godzin</button>
+            <button class="camera-dock-btn active" role="tab" data-range="1d" title="Średnia z 30 minut">1 dzień</button>
+            <button class="camera-dock-btn" role="tab" data-range="3d" title="Średnia z godziny">3 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="7d" title="Średnia z dnia">7 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="14d" title="Średnia z dnia">14 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="30d" title="Średnia z 3 dni">30 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="3m" title="Średnia z tygodnia">3 miesiące</button>
+            <button class="camera-dock-btn" role="tab" data-range="6m" title="Średnia z 2 tygodni">6 miesięcy</button>
+          </div>
+          <!-- Parametr na wykresie -->
+          <div class="camera-dock chart-dock" id="atmo-param-dock" role="tablist" aria-label="Parametr wykresu">
+            <button class="camera-dock-btn active" role="tab" data-param="temperatura">Temperatura</button>
+            <button class="camera-dock-btn" role="tab" data-param="wilgoc">Wilgotność</button>
+            <button class="camera-dock-btn" role="tab" data-param="cisnienie">Ciśnienie</button>
+          </div>
         </div>
       </div>
     </section>
 
     <!-- ============ SAMOPOCZUCIE ============ -->
-    <section id="samopoczucie" class="page">
-      <a href="#home" class="back-btn">← Wróć do panelu</a>
-      <h1>Samopoczucie pszczół</h1>
-      <p class="lead">Stan rodziny, częstotliwości i natężenie dźwięku.</p>
-      <div class="stats">
+    <section id="samopoczucie" class="page page-chart">
+      <div class="page-head">
+        <a href="#home" class="back-btn">← Wróć do panelu</a>
+        <h1>Samopoczucie pszczół</h1>
+      </div>
+      <div class="stats stats-strip">
         <div class="stat primary">
           <div class="label">Stan rodziny</div>
           <div class="value small"><span id="w-status">--</span></div>
@@ -234,9 +276,27 @@
           <div class="label">Natężenie dźwięku</div>
           <div class="value"><span id="w-sound">--</span><span class="unit">dB</span></div>
         </div>
+        <div class="stat">
+          <div class="label">Ostatni pomiar</div>
+          <div class="value small"><span id="w-updated">--</span></div>
+        </div>
       </div>
-      <div class="panel">
-        <div class="row"><span>Ostatni pomiar</span><strong id="w-updated">--</strong></div>
+      <!-- Wykres częstotliwości; poziome linie = granice stanów z wellbeing_detector_driver.py -->
+      <div class="chart-card">
+        <div class="chart-host" id="wellbeing-chart"></div>
+        <div class="chart-foot">
+          <!-- Zakres wykresu (czas do teraz). Średnie i zakresy: app.py -> CHART_RANGES -->
+          <div class="camera-dock chart-dock" id="wellbeing-range-dock" role="tablist" aria-label="Zakres wykresu">
+            <button class="camera-dock-btn" role="tab" data-range="12h" title="Średnia z 15 minut">12 godzin</button>
+            <button class="camera-dock-btn active" role="tab" data-range="1d" title="Średnia z 30 minut">1 dzień</button>
+            <button class="camera-dock-btn" role="tab" data-range="3d" title="Średnia z godziny">3 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="7d" title="Średnia z dnia">7 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="14d" title="Średnia z dnia">14 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="30d" title="Średnia z 3 dni">30 dni</button>
+            <button class="camera-dock-btn" role="tab" data-range="3m" title="Średnia z tygodnia">3 miesiące</button>
+            <button class="camera-dock-btn" role="tab" data-range="6m" title="Średnia z 2 tygodni">6 miesięcy</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -378,8 +438,8 @@
                 <div class="setting-control">
                   <select id="temp-range-select">
                     <option value="obecna">Obecna</option>
-                    <option value="min-24h">Min. z 24h</option>
-                    <option value="max-24h">Maks. z 24h</option>
+                    <option value="min-24h">Minimum z 24 godzin</option>
+                    <option value="max-24h">Maksimum z 24 godzin</option>
                   </select>
                 </div>
               </div>
@@ -403,8 +463,8 @@
                 <div class="setting-control">
                   <select id="humidity-range-select">
                     <option value="obecna">Obecna</option>
-                    <option value="min-24h">Min. z 24h</option>
-                    <option value="max-24h">Maks. z 24h</option>
+                    <option value="min-24h">Minimum z 24 godzin</option>
+                    <option value="max-24h">Maksimum z 24 godzin</option>
                   </select>
                 </div>
               </div>
@@ -428,8 +488,8 @@
                 <div class="setting-control">
                   <select id="pressure-range-select">
                     <option value="obecna">Obecna</option>
-                    <option value="min-24h">Min. z 24h</option>
-                    <option value="max-24h">Maks. z 24h</option>
+                    <option value="min-24h">Minimum z 24 godzin</option>
+                    <option value="max-24h">Maksimum z 24 godzin</option>
                   </select>
                 </div>
               </div>
@@ -506,6 +566,15 @@
                     <input type="checkbox" id="feeder-rate-toggle" checked>
                     <span class="slider"></span>
                   </label>
+                </div>
+              </div>
+              <div class="setting-row">
+                <div>
+                  <div class="setting-label">Wymaż zapisane dane</div>
+                  <div class="setting-desc">Wyczyść trwale zapisane dane nt. atmosfery i samopoczucia</div>
+                </div>
+                <div class="setting-control">
+                  <button type="button" class="back-btn btn-wide btn-danger" id="btn-clear-history">Usuń</button>
                 </div>
               </div>
             </div>
@@ -594,6 +663,9 @@
     <button type="button" class="popup-close" id="popup-close" aria-label="Zamknij">✕</button>
   </div>
 
+  <!-- Ustawienia tego urządzenia z data/global.conf -->
+  <script>window.BEENEST_DEVICE = {{ device|tojson }};</script>
+  <script src="{{ url_for('static', filename='chart.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 

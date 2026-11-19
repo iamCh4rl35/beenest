@@ -6,7 +6,8 @@ Pliki projektu:
     main.html                 <- strona (w katalogu głównym, nie w templates/)
     static/app.js, style.css
     *_detector_driver.py      <- po jednym na czujnik, każdy ma read() -> słownik liczb
-    data/beenest.db           <- powstaje sam (historia pomiarów + ustawienia zapisane na urządzeniu)
+    data/beenest.db           <- powstaje sam (historia pomiarów)
+    data/global.conf          <- powstaje sam: ustawienia (zapis danych, wygląd, osobno każde urządzenie)
 
 Jak to działa:
   1. Wątek w tle co SAMPLE_EVERY sekund czyta czujniki (nawet gdy nikt nie ma otwartej strony),
@@ -22,6 +23,7 @@ Uruchomienie:   pip install -r requirements.txt     (raz)
 Po starcie serwer wypisuje adresy do wpisania na telefonie (http://..., bez "s").
 """
 import atexit
+import configparser
 import contextlib
 import json
 import logging
@@ -63,11 +65,8 @@ CAMERA_OFFLINE_AFTER = 10   # s    – brak klatki dłużej niż tyle = kamera o
 REFILL_JUMP = 10            # pkt% – o tyle musi wzrosnąć poziom, by uznać napełnienie
 REFILL_COOLDOWN = 60        # s    – kolejne napełnienie liczymy najwcześniej po tylu sekundach
 
-# Progi oceny "Stan rodziny" 
-WELLBEING_OK_HZ = (80, 185)
-WELLBEING_SENSITIVE_HZ = (185, 250)
-WELLBEING_UPLIFTET_HZ = (250, 300)
-WELLBEING_MAX_DB = 70
+# Progi oceny "Stan rodziny" są w wellbeing_detector_driver.py (tam je zmieniaj)
+from wellbeing_detector_driver import WELLBEING_OK_HZ, WELLBEING_SENSITIVE_HZ, WELLBEING_UPLIFTET_HZ, WELLBEING_MAX_DB
 
 # Wylotek: pozycja serwa w %. Poniżej/powyżej progów = zablokowany/otwarty, pomiędzy = w ruchu.
 OUTLET_BLOCKED_BELOW = 5
@@ -89,13 +88,63 @@ DAY_RANGES = {
 }
 FEEDER_HISTORY_KEYS = ("f_level", "f_weight")
 
-# Ustawienia z panelu, które dotyczą Raspberry (reszta – wygląd, alarm – zapisane w przeglądarce).
+# Wykresy: zakres -> (ile sekund wstecz od teraz, szerokość przedziału, z którego liczymy średnią)
+_H, _D = 3600, 86400
+CHART_RANGES = {
+    "12h": (12 * _H, 15 * 60),
+    "1d":  (1 * _D, 30 * 60),
+    "3d":  (3 * _D, 1 * _H),
+    "7d":  (7 * _D, 1 * _D),
+    "14d": (14 * _D, 1 * _D),
+    "30d": (30 * _D, 3 * _D),
+    "3m":  (90 * _D, 7 * _D),
+    "6m":  (180 * _D, 14 * _D),
+}
+
+# Wszystkie ustawienia są w data/global.conf (patrz sekcja "Ustawienia" niżej).
 # klucz: (wartość domyślna, dozwolone wartości; None = tak/nie)
+CONF_PATH = os.path.join(ROOT, "data", "global.conf")
+
+# [zapis] – dotyczą Raspberry, wspólne dla wszystkich urządzeń
 SERVER_SETTINGS = {
     "saveInterval":  ("60", {"1", "5", "10", "30", "60", "180"}),   # częstotliwość zapisu - minuty
     "dataRetention": ("12", {"1", "3", "6", "12", "24"}),           # przetrzymywanie danych - miesiące
     "feederRate":    (True, None),
 }
+
+# [urzadzenie <adres IP>] – osobno dla każdego telefonu / komputera / wyświetlacza
+_HL, _RG = {"w-ulu", "na-zewnatrz"}, {"obecna", "min-24h", "max-24h"}
+DEVICE_SETTINGS = {
+    "theme":             ("bialy-pylek", {"bialy-pylek", "lekki-miodek", "nocna-czern", "miodna-szarosc"}),
+    "highContrast":      (False, None),
+    "atmoData":          ("temperatura", {"temperatura", "wilgoc", "cisnienie"}),
+    "tempHighlight":     ("w-ulu", _HL),
+    "tempRange":         ("obecna", _RG),
+    "humidityHighlight": ("w-ulu", _HL),
+    "humidityRange":     ("obecna", _RG),
+    "pressureHighlight": ("w-ulu", _HL),
+    "pressureRange":     ("obecna", _RG),
+    "wellbeingData":     ("stan", {"stan", "natezenie", "czestotliwosci"}),
+    "feederData":        ("poziom", {"poziom", "ostatnie"}),
+    "feederAlarm":       (True, None),
+    "camera":            ("external", {"external", "internal"}),
+}
+
+# [wyglad] – stałe dla całej strony (zmienne CSS). Nazwa = zmienna CSS bez "--".
+LOOK_SETTINGS = {
+    "anim-duration":       (".4s", "czas animacji: przełącznik kamer/kategorii, listy, okna (większy = wolniej)"),
+    "anim-ease":           ("cubic-bezier(.32, .72, 0, 1)", "krzywa animacji; inne: ease-in-out | cubic-bezier(.34, 1.56, .64, 1) = sprężyna"),
+    "chart-grow-duration": ("1.2s", "wykres: wejście linii z osi X przy otwarciu zakładki"),
+    "chart-zoom-duration": (".65s", "wykres: zmiana zakresu, przybliżenie, zmiana parametru"),
+    "chart-ease":          ("cubic-bezier(.45, 0, .2, 1)", "krzywa wykresów; var(--anim-ease) = taka sama jak reszta strony"),
+    "chart-grid-size":     ("24px", "oczko kratki w tle wykresu"),
+    "hover-lift":          ("-4px", "karty Menu Głównego: o ile unoszą się po najechaniu (0 = wcale)"),
+    "hover-glow":          ("0 14px 36px color-mix(in srgb, var(--orange) 32%, transparent)", "poświata pod kartą: 3. liczba = rozmycie, % = siła"),
+    "hover-ring":          ("color-mix(in srgb, var(--orange) 45%, transparent)", "pierścień wokół karty (siła w %)"),
+    "hover-tint":          ("color-mix(in srgb, var(--orange) 8%, transparent)", "podbarwienie wnętrza karty"),
+}
+_LOOK_BODY = {"hover-lift", "hover-glow", "hover-ring", "hover-tint"}   # zależą od koloru motywu -> na <body>
+_SAFE_CSS = re.compile(r"^[\w\s.,%()#+-]+$")                            # bez ; { } < > – nic nie wyjdzie poza wartość
 
 # -------------------------------------------------------------
 #  Ciche logi (strona odpytuje serwer co 5 s – bez wpisu o każdym żądaniu)
@@ -161,29 +210,198 @@ def kv_set(key, value):
         con.execute("INSERT OR REPLACE INTO kv VALUES (?, ?)", (key, json.dumps(value)))
 
 
+# -------------------------------------------------------------
+#  Ustawienia: data/global.conf
+#  Zwykły plik tekstowy (INI). Tworzy się sam; można go edytować ręcznie także przy działającej
+#  aplikacji – zmiana daty pliku = wczytanie od nowa. Zła wartość = wartość domyślna + komunikat.
+# -------------------------------------------------------------
+_conf_lock = threading.RLock()
+_conf = {"mtime": None, "zapis": {}, "wyglad": {}, "devices": {}}
+DEVICE_PREFIX = "urzadzenie "
+_BOOL = {"true": True, "tak": True, "1": True, "yes": True, "on": True,
+         "false": False, "nie": False, "0": False, "no": False, "off": False}
+
+
+def _check(spec, key, value, source):
+    """Wartość z panelu (JSON) lub z pliku (tekst) -> poprawna wartość. Błąd -> ValueError."""
+    _, allowed = spec[key]
+    if allowed is None:
+        if isinstance(value, str) and source == "plik":
+            value = _BOOL.get(value.strip().lower(), value)
+        if not isinstance(value, bool):
+            raise ValueError(f"{key}: oczekiwano true/false")
+        return value
+    value = str(value).strip()
+    if value not in allowed:
+        raise ValueError(f"{key}: niedozwolona wartość {value}")
+    return value
+
+
+def _clean_section(spec, raw, where):
+    out = {}
+    for key, value in raw.items():
+        if key not in spec:
+            if key != "opis":
+                log(f"global.conf [{where}]: nieznane ustawienie '{key}' – pomijam")
+            continue
+        try:
+            out[key] = _check(spec, key, value, "plik")
+        except ValueError as e:
+            log(f"global.conf [{where}]: {e} – używam domyślnej")
+    return out
+
+
+def _migrate_old_settings():
+    """Starsze wersje trzymały [zapis] w bazie (kv "settings") – przenosimy raz do global.conf."""
+    if not os.path.exists(DB_PATH):
+        return {}
+    with db() as con:
+        row = con.execute("SELECT value FROM kv WHERE key = 'settings'").fetchone()
+        con.execute("DELETE FROM kv WHERE key = 'settings'")
+    old = json.loads(row[0]) if row else {}
+    return {k: v for k, v in old.items() if k in SERVER_SETTINGS}
+
+
+def _load_conf():
+    """Wczytuje plik, jeśli zmienił się od ostatniego razu. Brak pliku = tworzy go z domyślnymi."""
+    with _conf_lock:
+        try:
+            mtime = os.stat(CONF_PATH).st_mtime_ns
+        except FileNotFoundError:
+            _conf.update(mtime=None, zapis=_migrate_old_settings(), wyglad={}, devices={})
+            _save_conf()
+            return _conf
+        if mtime == _conf["mtime"]:
+            return _conf
+        cp = configparser.ConfigParser(interpolation=None)   # bez %-podstawień (w CSS bywa "32%")
+        cp.optionxform = str                                  # wielkość liter w nazwach ma znaczenie
+        try:
+            cp.read(CONF_PATH, encoding="utf-8")
+        except configparser.Error as e:
+            log(f"global.conf jest uszkodzony ({e}) – używam domyślnych, plik zostawiam bez zmian")
+            _conf.update(mtime=mtime, zapis={}, wyglad={}, devices={})
+            return _conf
+        wyglad = {}
+        for key, value in (cp["wyglad"].items() if cp.has_section("wyglad") else ()):
+            if key in LOOK_SETTINGS and _SAFE_CSS.match(value.strip()):
+                wyglad[key] = value.strip()
+            else:
+                log(f"global.conf [wyglad]: pomijam '{key}'")
+        devices = {}
+        for name in cp.sections():
+            if name.startswith(DEVICE_PREFIX):
+                ip = name[len(DEVICE_PREFIX):].strip()
+                devices[ip] = _clean_section(DEVICE_SETTINGS, dict(cp[name]), name)
+                if cp[name].get("opis"):
+                    devices[ip]["opis"] = cp[name]["opis"]
+        zapis = _clean_section(SERVER_SETTINGS, dict(cp["zapis"]), "zapis") if cp.has_section("zapis") else {}
+        _conf.update(mtime=mtime, zapis=zapis, wyglad=wyglad, devices=devices)
+        return _conf
+
+
+def _fmt(value):
+    return ("true" if value else "false") if isinstance(value, bool) else str(value)
+
+
+def _save_conf():
+    """Zapisuje cały plik od nowa (z opisami). Najpierw do pliku tymczasowego – prąd zgaśnie, plik zostaje cały."""
+    with _conf_lock:
+        z, w = _conf["zapis"], _conf["wyglad"]
+        lines = [
+            "# BEENest – ustawienia. Plik tworzy się sam; możesz go edytować ręcznie (zmiany wczytują się same).",
+            "# Zła wartość = używana jest domyślna (komunikat w konsoli). Usunięcie linijki = wartość domyślna.",
+            "",
+            "[zapis]",
+            "# Wspólne dla wszystkich urządzeń (Ustawienia -> Działanie).",
+            "# saveInterval: co ile minut zapisywać pomiary do historii: 1, 5, 10, 30, 60, 180",
+            "# dataRetention: po ilu miesiącach usuwać najstarsze pomiary: 1, 3, 6, 12, 24",
+            "# feederRate: zapisuj też tempo rozładowania dokarmiaczki: true / false",
+        ]
+        lines += [f"{k} = {_fmt(z.get(k, d))}" for k, (d, _) in SERVER_SETTINGS.items()]
+        lines += ["", "[wyglad]",
+                  "# Stałe dla całej strony (wartości zmiennych CSS). Po zmianie odśwież stronę."]
+        for k, (d, desc) in LOOK_SETTINGS.items():
+            lines += [f"# {desc}", f"{k} = {w.get(k, d)}"]
+        lines += ["", "# ---- Urządzenia: osobne ustawienia (motyw, kamera, co pokazują karty...) dla każdego adresu IP.",
+                  "# Zapisane są tylko wartości inne niż domyślne. Usuń całą sekcję, by urządzenie wróciło do domyślnych.",
+                  "# Dozwolone wartości:"] + [
+                  f"#   {k}: " + ("true / false" if a is None else " / ".join(sorted(a))) + f"   (domyślnie {_fmt(d)})"
+                  for k, (d, a) in DEVICE_SETTINGS.items()]
+        for ip, dev in _conf["devices"].items():
+            lines += ["", f"[{DEVICE_PREFIX}{ip}]"]
+            if dev.get("opis"):
+                lines.append(f"opis = {dev['opis']}")
+            lines += [f"{k} = {_fmt(v)}" for k, v in dev.items() if k != "opis"]
+        os.makedirs(os.path.dirname(CONF_PATH), exist_ok=True)
+        tmp = CONF_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        os.replace(tmp, CONF_PATH)
+        _conf["mtime"] = os.stat(CONF_PATH).st_mtime_ns
+
+
 def get_server_settings():
-    saved = kv_get("settings", {})
-    return {k: saved.get(k, default) for k, (default, _) in SERVER_SETTINGS.items()}
+    z = _load_conf()["zapis"]
+    return {k: z.get(k, default) for k, (default, _) in SERVER_SETTINGS.items()}
+
+
+def get_device_settings(ip):
+    dev = _load_conf()["devices"].get(ip, {})
+    return {k: dev.get(k, default) for k, (default, _) in DEVICE_SETTINGS.items()}
+
+
+def known_device(ip):
+    return ip in _load_conf()["devices"]
+
+
+def set_settings(changes, ip, about=""):
+    """
+    Zmiany z panelu. Klucze [zapis] trafiają do wspólnej sekcji, reszta do sekcji tego urządzenia.
+    Sprawdza wszystko, zanim cokolwiek zapisze. Błąd -> ValueError.
+    """
+    if not isinstance(changes, dict):
+        raise ValueError("Oczekiwano obiektu JSON")
+    server, device = {}, {}
+    for key, value in changes.items():
+        if key in SERVER_SETTINGS:
+            server[key] = _check(SERVER_SETTINGS, key, value, "panel")
+        elif key in DEVICE_SETTINGS:
+            device[key] = _check(DEVICE_SETTINGS, key, value, "panel")
+        else:
+            raise ValueError(f"Nieznane ustawienie: {key}")
+    with _conf_lock:
+        conf = _load_conf()
+        conf["zapis"].update(server)
+        if ip is not None and (device or ip not in conf["devices"]):
+            dev = conf["devices"].setdefault(ip, {"opis": about} if about else {})
+            for key, value in device.items():
+                if value == DEVICE_SETTINGS[key][0]:
+                    dev.pop(key, None)          # domyślna = nie zapisujemy (zmiana domyślnych dotrze do urządzenia)
+                else:
+                    dev[key] = value
+        _save_conf()
 
 
 def set_server_settings(changes):
-    """Sprawdza wszystko, zanim cokolwiek zapisze. Błąd -> ValueError."""
-    if not isinstance(changes, dict):
-        raise ValueError("Oczekiwano obiektu JSON")
-    clean = {}
-    for key, value in changes.items():
-        if key not in SERVER_SETTINGS:
-            raise ValueError(f"Nieznane ustawienie: {key}")
-        _, allowed = SERVER_SETTINGS[key]
-        if allowed is None:
-            if not isinstance(value, bool):
-                raise ValueError(f"{key}: oczekiwano true/false")
-        else:
-            value = str(value)
-            if value not in allowed:
-                raise ValueError(f"{key}: niedozwolona wartość {value}")
-        clean[key] = value
-    kv_set("settings", {**get_server_settings(), **clean})
+    """Tylko [zapis] (zostawione dla zgodności i testów)."""
+    if isinstance(changes, dict) and any(k not in SERVER_SETTINGS for k in changes):
+        raise ValueError("Nieznane ustawienie: " + next(k for k in changes if k not in SERVER_SETTINGS))
+    set_settings(changes, None)
+
+
+def look_css():
+    """[wyglad] -> CSS wstawiany do strony zaraz po style.css (nadpisuje wartości z pliku CSS)."""
+    w = _load_conf()["wyglad"]
+    root = "".join(f"--{k}:{w.get(k, d)};" for k, (d, _) in LOOK_SETTINGS.items() if k not in _LOOK_BODY)
+    body = "".join(f"--{k}:{w.get(k, d)};" for k, (d, _) in LOOK_SETTINGS.items() if k in _LOOK_BODY)
+    # "Ogranicz ruch" w systemie nadal wyłącza animacje
+    return (f":root{{{root}}}body{{{body}}}"
+            "@media (prefers-reduced-motion: reduce){:root{--anim-duration:.01s;--chart-grow-duration:.01s;--chart-zoom-duration:.01s}}")
+
+
+def device_label(req):
+    m = re.search(r"\(([^)]*)\)", req.headers.get("User-Agent", ""))
+    return re.sub(r"[\r\n\[\]]", " ", m.group(1))[:60] if m else ""
 
 
 # -------------------------------------------------------------
@@ -239,17 +457,18 @@ def day_range(key, current, now):
 
 
 def wellbeing_status(frequency, sound):
+    """
+    Stan rodziny z częstotliwości (progi: wellbeing_detector_driver.py) i głośności.
+    Do WELLBEING_OK_HZ[1] = Dobre, potem Niespokojne, od WELLBEING_UPLIFTET_HZ[0] w górę = Wściekłe.
+    Głośność powyżej WELLBEING_MAX_DB podnosi "Dobre" do "Niespokojne".
+    """
     if frequency is None or sound is None:
         return "Brak danych"
-    if frequency is not None and frequency <= WELLBEING_OK_HZ[1]:
-            return "Dobre"
-    if frequency is not None and WELLBEING_SENSITIVE_HZ[0] > frequency <= WELLBEING_SENSITIVE_HZ[1]:
-            return "Niespokojne"
-    if frequency is not None and WELLBEING_UPLIFTET_HZ[0] > frequency:
-            return "Wściekłe"
-    if sound is not None and sound > WELLBEING_MAX_DB:
+    if frequency > WELLBEING_UPLIFTET_HZ[0]:
+        return "Wściekłe"
+    if frequency > WELLBEING_OK_HZ[1] or sound > WELLBEING_MAX_DB:
         return "Niespokojne"
-    return "Brak danych"
+    return "Dobre"
 
 
 def outlet_status(position):
@@ -302,6 +521,30 @@ def save_history(raw, settings, now):
         con.executemany("INSERT INTO readings VALUES (?, ?, ?)", rows)
         con.execute("DELETE FROM readings WHERE ts < ?", (cutoff,))
     _state["last_save"] = int(now)
+
+
+def history_series(key, rng, now):
+    """
+    Średnie z zapisanej historii dla wykresu: [[czas, wartość], ...] od najstarszego.
+    Przedziały są wyrównane do lokalnej północy; czas punktu = średni czas próbek w przedziale.
+    """
+    span, step = CHART_RANGES[rng]
+    off = time.localtime(now).tm_gmtoff
+    with db() as con:
+        rows = con.execute(
+            "SELECT AVG(ts), AVG(value) FROM readings WHERE key = ? AND ts > ? AND ts <= ? "
+            "GROUP BY CAST((ts + ?) / ? AS INTEGER) ORDER BY 1",
+            (key, int(now) - span, int(now), off, step)).fetchall()
+    return [[round(t), round(v, 3)] for t, v in rows]
+
+
+def wellbeing_bands():
+    """Zakresy stanów samopoczucia (z wellbeing_detector_driver.py) – linie na wykresie częstotliwości."""
+    return [
+        {"from": WELLBEING_OK_HZ[0], "to": WELLBEING_OK_HZ[1], "label": "Dobre"},
+        {"from": WELLBEING_SENSITIVE_HZ[0], "to": WELLBEING_SENSITIVE_HZ[1], "label": "Niespokojne"},
+        {"from": WELLBEING_UPLIFTET_HZ[0], "to": WELLBEING_UPLIFTET_HZ[1], "label": "Wściekłe"},
+    ]
 
 
 def build_payload(raw, now):
@@ -519,7 +762,10 @@ def json_only():
 @app.route("/")
 def index():
     """Serwuje główny plik HTML (SPA z routingiem po #hashtagu)."""
-    return render_template("main.html")
+    ip = request.remote_addr
+    return render_template("main.html", look_css=look_css(),
+                           device={"settings": {**get_server_settings(), **get_device_settings(ip)},
+                                   "known": known_device(ip)})
 
 
 @app.route("/api/data")
@@ -529,6 +775,31 @@ def api_data():
     if cam not in camera.CAMERAS:
         cam = camera.CAMERAS[0]
     return jsonify({**get_latest(), **camera_info(cam), **disk_info()})
+
+
+@app.route("/api/history")
+def api_history():
+    """
+    Dane do wykresów: /api/history?keys=temp_current,temp_outside&range=1d
+    Zakresy: 12h, 1d, 3d, 7d, 14d, 30d, 3m, 6m (patrz CHART_RANGES).
+    """
+    rng = request.args.get("range", "1d")
+    if rng not in CHART_RANGES:
+        return jsonify(error="Nieznany zakres"), 400
+    keys = [k for k in request.args.get("keys", "").split(",") if k]
+    allowed = set(HISTORY_KEYS) | set(FEEDER_HISTORY_KEYS)
+    if not keys or len(keys) > 4 or any(k not in allowed for k in keys):
+        return jsonify(error="Nieznany parametr"), 400
+    now = int(time.time())
+    span, step = CHART_RANGES[rng]
+    out = {
+        "range": rng, "from": now - span, "to": now, "step": step,
+        "save_interval": int(get_server_settings()["saveInterval"]) * 60,
+        "series": {k: history_series(k, rng, now) for k in keys},
+    }
+    if "w_frequency" in keys:
+        out["bands"] = wellbeing_bands()
+    return jsonify(out)
 
 
 @app.route("/api/camera/<name>/stream")
@@ -562,10 +833,10 @@ def api_settings():
         if (bad := json_only()):
             return bad
         try:
-            set_server_settings(request.get_json(silent=True))
+            set_settings(request.get_json(silent=True), request.remote_addr, device_label(request))
         except ValueError as e:
             return jsonify(error=str(e)), 400
-    return jsonify(get_server_settings())
+    return jsonify({**get_server_settings(), **get_device_settings(request.remote_addr)})
 
 
 @app.post("/api/system/reboot")
@@ -588,6 +859,25 @@ def api_shutdown():
     except Exception as e:
         return jsonify(error=error_text(e)), 500
     return jsonify(ok=True)
+
+
+@app.post("/api/history/clear")
+def api_history_clear():
+    """Ustawienia → Działanie → "Wymaż zapisane dane": usuwa historię atmosfery i samopoczucia (HISTORY_KEYS)."""
+    if (bad := json_only()):
+        return bad
+    try:
+        marks = ",".join("?" * len(HISTORY_KEYS))
+        with db() as con:
+            deleted = con.execute(f"DELETE FROM readings WHERE key IN ({marks})", HISTORY_KEYS).rowcount
+        con = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)
+        try:
+            con.execute("VACUUM")          # wymazane rekordy znikają też z samego pliku bazy
+        finally:
+            con.close()
+    except Exception as e:
+        return jsonify(error=error_text(e)), 500
+    return jsonify(ok=True, deleted=deleted)
 
 
 @app.post("/api/system/update")

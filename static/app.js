@@ -30,9 +30,9 @@
     camera: 'external'
   };
 
-  // Te trzy dotyczą zapisu danych na Raspberry, więc są trzymane na serwerze (wspólne dla
-  // wszystkich telefonów). Reszta (wygląd, alarm, kamera) jest osobno w każdej przeglądarce.
-  const SERVER_KEYS = ['saveInterval', 'dataRetention', 'feederRate'];
+  // Wszystkie ustawienia są na Raspberry w data/global.conf: [zapis] wspólne dla wszystkich,
+  // reszta (wygląd, karty, alarm, kamera) osobno dla każdego urządzenia (po adresie IP).
+  // Serwer wkleja je do strony (window.BEENEST_DEVICE), więc są od razu, bez czekania.
 
   // id elementu w main.html -> nazwa ustawienia
   const SELECTS = {
@@ -55,28 +55,8 @@
     'feeder-alarm-toggle': 'feederAlarm'
   };
 
-  const SETTINGS_VERSION = 2;
-
-  function readStored() {
-    try {
-      const v = JSON.parse(localStorage.getItem('beenest-settings'));
-      if (!v || typeof v !== 'object') return {};
-      // Wersja 1 zapisywała też wartości domyślne, a domyślny kontrast zmienił się na wyłączony.
-      // Stary zapis "highContrast" nie jest więc świadomym wyborem – pomijamy go (raz).
-      if (v._v !== SETTINGS_VERSION) delete v.highContrast;
-      delete v._v;
-      return v;
-    } catch (e) { return {}; }   // pusty / uszkodzony wpis albo zablokowany localStorage
-  }
-  const settings = Object.assign({}, defaultSettings, readStored());
-
-  // Zapisujemy tylko to, co różni się od domyślnych – dzięki temu zmiana wartości domyślnych
-  // w nowej wersji strony dociera do urządzeń, które niczego świadomie nie zmieniały.
-  function saveSettings() {
-    const changed = { _v: SETTINGS_VERSION };
-    Object.keys(settings).forEach(k => { if (settings[k] !== defaultSettings[k]) changed[k] = settings[k]; });
-    try { localStorage.setItem('beenest-settings', JSON.stringify(changed)); } catch (e) { }
-  }
+  const device = window.BEENEST_DEVICE || { settings: {}, known: true };
+  const settings = Object.assign({}, defaultSettings, device.settings);
 
   function applyTheme() {
     document.body.setAttribute('data-theme', settings.theme);
@@ -102,27 +82,41 @@
     return data;
   }
 
-  async function pullServerSettings() {
-    try {
-      const res = await fetch('/api/settings', { cache: 'no-store' });
-      if (!res.ok) return;
-      const s = await res.json();
-      SERVER_KEYS.forEach(k => { if (k in s) settings[k] = s[k]; });
-      saveSettings();
-      applySettingsToUI();
-    } catch (e) { }
+  async function pushSettings(changes) {
+    try { await postJSON('/api/settings', changes); }
+    catch (e) { showPopup('Nie udało się zapisać ustawienia na urządzeniu: ' + e.message, 6000, false); }
   }
 
-  async function pushServerSetting(key, value) {
-    try { await postJSON('/api/settings', { [key]: value }); }
-    catch (e) { showPopup('Nie udało się zapisać ustawienia na urządzeniu: ' + e.message, 6000, false); }
+  // Jednorazowo: starsze wersje trzymały ustawienia w przeglądarce. Nowe urządzenie (bez sekcji
+  // w global.conf) przenosi je na Raspberry; potem wpis w przeglądarce jest usuwany.
+  function migrateBrowserSettings() {
+    let old = null;
+    try { old = JSON.parse(localStorage.getItem('beenest-settings')); } catch (e) { }
+    try { localStorage.removeItem('beenest-settings'); } catch (e) { }
+    if (device.known || !old || typeof old !== 'object') return;
+    if (old._v !== 2) delete old.highContrast;   // wersja 1 zapisywała dawny domyślny kontrast – to nie był wybór
+    const changes = {};
+    const valid = (k, v) => {                     // tylko wartości, które strona zna (lista w <select> / tak-nie / kamera)
+      const id = Object.keys(SELECTS).find(i => SELECTS[i] === k);
+      if (id) return !!$(id) && [...$(id).options].some(o => o.value === v);
+      if (k === 'camera') return v === 'external' || v === 'internal';
+      return typeof v === 'boolean';
+    };
+    Object.keys(defaultSettings).forEach(k => {
+      if (k in old && !['saveInterval', 'dataRetention', 'feederRate'].includes(k) && valid(k, old[k])) changes[k] = old[k];
+    });
+    if (!Object.keys(changes).length) return;
+    postJSON('/api/settings', changes).then(s => {
+      Object.keys(defaultSettings).forEach(k => { if (k in s) settings[k] = s[k]; });
+      applySettingsToUI();
+      applyCamera(settings.camera);
+    }).catch(() => { });
   }
 
   function onSettingChange(key, value) {
     settings[key] = value;
-    saveSettings();
     if (key === 'theme' || key === 'highContrast') applyTheme();
-    if (SERVER_KEYS.includes(key)) pushServerSetting(key, value);
+    pushSettings({ [key]: value });
     render();
   }
 
@@ -330,13 +324,13 @@
 
   /* ===== 6. KAMERA (dock) ===== */
   const CAMERA_NAMES = { external: 'Zewnętrzna', internal: 'Wewnętrzna' };
-  function applyCamera(cam) {
+  function applyCamera(cam, persist) {
     if (!CAMERA_NAMES[cam]) cam = 'external';
     if (cam !== settings.camera) {           // dane kamery należą do poprzedniej kamery
       state.m_signal = state.m_updated = state.m_status = null;
     }
+    if (persist && cam !== settings.camera) pushSettings({ camera: cam });
     settings.camera = cam;
-    saveSettings();
     document.querySelectorAll('.camera-dock-btn[data-camera]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.camera === cam);
     });
@@ -345,7 +339,7 @@
     poll();
   }
   document.querySelectorAll('.camera-dock-btn[data-camera]').forEach(btn => {
-    btn.addEventListener('click', () => applyCamera(btn.dataset.camera));
+    btn.addEventListener('click', () => applyCamera(btn.dataset.camera, true));
   });
 
   /* ===== 6b. PODGLĄD NA ŻYWO ===== */
@@ -474,6 +468,113 @@
     window.addEventListener('hashchange', () => { if (location.hash !== '#monitoring') reset(); });
   })();
 
+  /* ===== 6d. WYKRESY (zakładki Atmosfera i Samopoczucie) ===== */
+  // Rysuje je static/chart.js (BeeChart). Zakresy i szerokość uśredniania: app.py -> CHART_RANGES.
+  // Animacje: style.css -> --chart-grow-duration, --chart-zoom-duration, --chart-ease.
+  const CHART_AVG = { '12h': '15 minut', '1d': '30 minut', '3d': 'godziny', '7d': 'dnia', '14d': 'dnia', '30d': '3 dni', '3m': 'tygodnia', '6m': '2 tygodni' };
+  const CHART_SPAN = { '12h': '12 godzin', '1d': '24 godzin', '3d': '3 dni', '7d': '7 dni', '14d': '14 dni', '30d': '30 dni', '3m': '3 miesięcy', '6m': '6 miesięcy' };
+  const chartMemory = (() => { try { return JSON.parse(localStorage.getItem('beenest-charts')) || {}; } catch (e) { return {}; } })();
+  const rememberCharts = () => { try { localStorage.setItem('beenest-charts', JSON.stringify(chartMemory)); } catch (e) { /* tryb prywatny */ } };
+  const historyCache = new Map();   // ta sama prośba w ciągu minuty nie idzie drugi raz do Raspberry
+
+  // "co 1 minutę", "co 2 minuty", "co 60 minut"
+  const minutesText = n => n === 1 ? '1 minutę'
+    : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) ? n + ' minuty' : n + ' minut';
+  async function fetchHistory(keys, range, fresh) {
+    const id = keys.join(',') + '|' + range, hit = historyCache.get(id);
+    if (!fresh && hit && Date.now() - hit.at < 60000) return hit.data;
+    const r = await fetch('/api/history?keys=' + encodeURIComponent(keys.join(',')) + '&range=' + range, { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    historyCache.set(id, { at: Date.now(), data });
+    return data;
+  }
+
+  // cfg: { id, page, host, rangeDock, paramDock?, params: { nazwa: { keys, labels, unit, decimals } }, onParam? }
+  function initChartPanel(cfg) {
+    if (!window.BeeChart || !cfg.host) return null;
+    const mem = chartMemory[cfg.id] || (chartMemory[cfg.id] = {});
+    let range = CHART_AVG[mem.range] ? mem.range : '1d';
+    let param = cfg.params[mem.param] ? mem.param : Object.keys(cfg.params)[0];
+    const chart = new BeeChart(cfg.host);
+    let seq = 0;
+
+    const mark = (dock, attr, value) => dock && dock.querySelectorAll('.camera-dock-btn').forEach(b => {
+      const on = b.dataset[attr] === value;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+
+    async function load(mode, fresh) {
+      const my = ++seq, p = cfg.params[param];
+      try {
+        const d = await fetchHistory(p.keys, range, fresh);
+        if (my !== seq) return;                     // w międzyczasie kliknięto coś innego
+        chart.show({
+          from: d.from, to: d.to, step: d.step,
+          gap: Math.max(4 * d.step, 2.5 * d.save_interval),   // przerwa w linii = brak zapisów dłużej niż tyle
+          unit: p.unit, decimals: p.decimals, bands: d.bands || null, avgLabel: CHART_AVG[range],
+          series: p.keys.map((k, i) => ({ label: p.labels[i], points: d.series[k] || [] })),
+          emptyText: 'Brak zapisanych pomiarów z ostatnich ' + CHART_SPAN[range] + '. Pomiary zapisują się co '
+            + minutesText(Math.round(d.save_interval / 60)) + ' (Ustawienia → Działanie).'
+        }, mode);
+      } catch (e) {
+        if (my === seq) chart.error('Nie udało się pobrać danych wykresu.');
+      }
+    }
+
+    function setRange(r) {
+      if (r === range || !CHART_AVG[r]) return;
+      range = mem.range = r; rememberCharts();
+      mark(cfg.rangeDock, 'range', range);
+      load('domain');
+    }
+    function setParam(name) {
+      if (name === param || !cfg.params[name]) return;
+      param = mem.param = name; rememberCharts();
+      mark(cfg.paramDock, 'param', param);
+      if (cfg.onParam) cfg.onParam(param);
+      load('morph');
+    }
+
+    cfg.rangeDock.querySelectorAll('[data-range]').forEach(b => b.addEventListener('click', () => setRange(b.dataset.range)));
+    if (cfg.paramDock) cfg.paramDock.querySelectorAll('[data-param]').forEach(b => b.addEventListener('click', () => setParam(b.dataset.param)));
+    mark(cfg.rangeDock, 'range', range);
+    mark(cfg.paramDock, 'param', param);
+    if (cfg.onParam) cfg.onParam(param);
+
+    // Wejście na zakładkę = linia wyrasta z osi X; potem co minutę ciche odświeżenie.
+    const onPage = () => location.hash === '#' + cfg.page;
+    const enter = () => { if (onPage()) load('grow', true); };
+    window.addEventListener('hashchange', enter);
+    enter();
+    setInterval(() => { if (onPage() && !document.hidden && !chart.busy()) load('quiet', true); }, 60000);
+    return { chart, setParam, setRange };
+  }
+
+  const atmoChart = initChartPanel({
+    id: 'atmo', page: 'temperatura', host: $('atmo-chart'),
+    rangeDock: $('atmo-range-dock'), paramDock: $('atmo-param-dock'),
+    params: {
+      temperatura: { keys: ['temp_current', 'temp_outside'], labels: ['W ulu', 'Na zewnątrz'], unit: '°C', decimals: 1 },
+      wilgoc:      { keys: ['temp_humidity', 'temp_outside_humidity'], labels: ['W ulu', 'Na zewnątrz'], unit: '%', decimals: 0 },
+      cisnienie:   { keys: ['temp_pressure', 'temp_outside_pressure'], labels: ['W ulu', 'Na zewnątrz'], unit: 'hPa', decimals: 1 }
+    },
+    // grupa odczytów nad wykresem podświetla się razem z wybranym parametrem
+    onParam: name => document.querySelectorAll('.atmo-group').forEach(g => g.classList.toggle('is-selected', g.dataset.param === name))
+  });
+  document.querySelectorAll('.atmo-group').forEach(g => {
+    const pick = () => { if (atmoChart) atmoChart.setParam(g.dataset.param); };
+    g.addEventListener('click', pick);
+    g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+  });
+
+  initChartPanel({
+    id: 'wellbeing', page: 'samopoczucie', host: $('wellbeing-chart'),
+    rangeDock: $('wellbeing-range-dock'),
+    params: { czestotliwosc: { keys: ['w_frequency'], labels: ['Częstotliwość'], unit: 'Hz', decimals: 0 } }
+  });
+
   /* ===== 7. KOMUNIKAT (popup) I DŹWIĘK ===== */
   let popupTimer = null, beepTimer = null, audioCtx = null;
 
@@ -523,16 +624,29 @@
     update: '<path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>',
     power: '<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>',
     alert: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
-    check: '<path d="M20 6L9 17l-5-5"/>'
+    check: '<path d="M20 6L9 17l-5-5"/>',
+    trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'
   };
   const modal = { resolve: null, busy: false, lastFocus: null };
   const pageParts = () => document.querySelectorAll('header.topbar, .divider, main');
+
+  // Tekst okna: *słowo* = kursywa, \n = nowa linijka. Bez innerHTML – tekst z serwera nie wstrzyknie znaczników.
+  function setModalText(el, text) {
+    el.textContent = '';
+    text.split(/(\*[^*]+\*)/).forEach(part => {
+      if (/^\*[^*]+\*$/.test(part)) {
+        const em = document.createElement('em');
+        em.textContent = part.slice(1, -1);
+        el.appendChild(em);
+      } else if (part) el.appendChild(document.createTextNode(part));
+    });
+  }
 
   function modalRender(o) {
     modal.busy = !!o.busy;
     $('modal-icon').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' + (MODAL_ICONS[o.icon] || MODAL_ICONS.alert) + '</svg>';
     $('modal-title').textContent = o.title || '';
-    $('modal-text').textContent = o.text || '';
+    setModalText($('modal-text'), o.text || '');
     $('modal-text').hidden = !o.text;
     $('modal-option').hidden = !o.option;
     if (o.option) {
@@ -685,7 +799,7 @@
       }
     }
   };
-  const RANGE_LABEL = { 'obecna': '', 'min-24h': ' · min. 24 h', 'max-24h': ' · maks. 24 h' };
+  const RANGE_LABEL = { 'obecna': '', 'min-24h': ' · minimum z 24 godzin', 'max-24h': ' · maksimum z 24 godzin' };
   const LOC_LABEL = { in: 'Wewnętrzna', out: 'Zewnętrzna' };
 
   // Które wartości (w ulu / na zewnątrz) i jaki zakres wybrano dla danego parametru
@@ -873,6 +987,25 @@
     showPopup('Wyłączam urządzenie…', 60000, false);
   });
 
+  // Wymazanie historii atmosfery i samopoczucia (wykresy, minimum i maksimum z 24 godzin).
+  bindAction('btn-clear-history', async () => {
+    const ok = await confirmDialog({
+      icon: 'trash', danger: true, title: 'UWAGA!',
+      text: 'Ta operacja bezpowrotnie wymaże *WSZYSTKIE* zapisane dane atmosfery i samopoczucia.\nNa pewno chcesz to zrobić?',
+      buttons: [{ label: 'Rozmyśliłem się', value: 'cancel' }, { label: 'Tak, wiem co robię', value: 'ok', kind: 'danger' }]
+    });
+    if (!ok) return;
+    modalBusy('trash', 'Usuwam dane…', 'To może potrwać chwilę.');
+    try { await postJSON('/api/history/clear'); }
+    catch (e) {
+      await noticeDialog({ icon: 'alert', danger: true, title: 'Nie udało się usunąć danych', text: e.message });
+      return;
+    }
+    historyCache.clear();                                   // wykresy pobiorą pustą historię od nowa
+    poll();                                                 // minimum i maksimum z 24 godzin też od nowa
+    await noticeDialog({ icon: 'check', title: 'Dane usunięte', text: 'Zapisane dane atmosfery i samopoczucia zostały wymazane.' });
+  });
+
   // Aktualizacja NIE restartuje ula sama: restart tylko po zaznaczeniu opcji w oknie.
   bindAction('btn-update', async () => {
     const r = await confirmDialog({
@@ -897,5 +1030,5 @@
   /* ===== 13. INIT ===== */
   applySettingsToUI();
   applyCamera(settings.camera);     // rysuje stronę i od razu odpytuje serwer
-  pullServerSettings();
+  migrateBrowserSettings();
 })();
