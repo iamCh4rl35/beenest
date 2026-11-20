@@ -1159,7 +1159,7 @@
   $('tile-pair').addEventListener('click', () => $('btn-pair').click());
 
   // Zasilanie. Telefon: zamiast „Uśpij ekran” – „Zgaś ekran ula” (wyświetlacz robi animację sam).
-  // „Usuń z pamięci ula”: telefon usuwa sam siebie (jak „Odłącz od ula”), wyświetlacz otwiera listę urządzeń.
+  // „Usuń z pamięci ula” – tylko telefon: usuwa sam siebie (jak „Odłącz od ula”).
   $('tile-power').addEventListener('click', async () => {
     const box = document.createElement('div');
     box.className = 'power-options';
@@ -1168,8 +1168,7 @@
       { value: 'reboot', label: 'Uruchom ponownie', icon: MODAL_ICONS.update },
       sec.wyswietlacz ? { value: 'sleep', label: 'Uśpij ekran', icon: ICON_MOON }
         : { value: 'sleep-remote', label: 'Zgaś ekran ula', icon: ICON_MOON },
-      sec.wyswietlacz ? { value: 'devices', label: 'Usuń urządzenie z pamięci ula', icon: MODAL_ICONS.trash }
-        : { value: 'leave', label: 'Usuń z pamięci ula', icon: MODAL_ICONS.trash }
+      ...(sec.wyswietlacz ? [] : [{ value: 'leave', label: 'Usuń z pamięci ula', icon: MODAL_ICONS.trash }])
     ].forEach(o => {
       const b = document.createElement('button');
       b.type = 'button';
@@ -1189,7 +1188,6 @@
       catch (e) { showPopup('Nie udało się zgasić ekranu ula: ' + e.message, 6000, false); }
     }
     else if (r.value === 'leave') $('btn-leave').click();          // potwierdzenie i odłączenie jak w Działaniu
-    else if (r.value === 'devices') $('btn-devices').click();      // lista urządzeń (opcja administratora)
   });
 
   function quickRow(label, control) {

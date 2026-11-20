@@ -169,9 +169,9 @@ otwierającą ten sam panel bez linku. Motyw / kontrast / jasność są już tyl
 Telefon: 4 karty – Ustawienia, Zasilanie, Estetyka, **Parowanie** (kafelek `#tile-pair` widoczny wszędzie,
 na telefonie `order: 4` = obok Estetyki; `data-admin` – telefon bez uprawnień dostaje okno o braku uprawnień).
 Parowanie ma być kartą obok Estetyki, NIE opcją w Zasilaniu (poprawka użytkownika).
-Zasilanie: Wyłącz, Uruchom ponownie, Uśpij ekran / Zgaś ekran ula, oraz usuwanie z pamięci ula:
-telefon „Usuń z pamięci ula” = `#btn-leave` (odłącza sam siebie), wyświetlacz „Usuń urządzenie z pamięci ula”
-= `#btn-devices` (lista zapamiętanych, opcja administratora).
+Zasilanie: Wyłącz, Uruchom ponownie, Uśpij ekran / Zgaś ekran ula; **tylko na telefonie** „Usuń z pamięci ula”
+= `#btn-leave` (odłącza sam siebie). Na wyświetlaczu tej opcji nie ma (decyzja użytkownika; lista urządzeń
+zostaje w Działaniu → Urządzenia).
     * Ciasteczko urządzenia (`beenest`, sesja Flaska z id urządzenia, rok ważności, odnawiane przy każdym wejściu):
 **`SameSite=Lax`, nie Strict** – przy Strict Chrome na Androidzie nie wysyłał go przy wejściu przez przekierowanie
 10.42.0.1 → beenest.local, z kodu QR albo z innej aplikacji i zapamiętany Pixel widział ekran parowania
@@ -320,6 +320,45 @@ wymaga wyświetlacz), `data-only="wyswietlacz|telefon"`. Serwer sprawdza uprawni
 (odwrócony kod źle się skanuje); w wysokim kontraście czarne. Sprawdzone `zbarimg`.
 * **Układ musi mieścić się bez przewijania na 1024×600** (wyświetlacz przy Pi). Sprawdzaj też
 telefon (\~390 px szerokości) i 1920×1080.
+
+## Plan podłączeń czujników (2026-11-20, jeszcze niepodłączone)
+
+Nakładka: DFRobot IO Expansion HAT for Raspberry Pi V1.0 (opis pinów BCM + WiringPi; „SDA1 9 / SCL1 8” na
+nakładce to numery WiringPi – fizycznie SDA = pin 3, SCL = pin 5). **Pełna rozpiska dla użytkownika:
+`łączenia czujników.txt`** (w katalogu projektu na PC i na Pi, poza gitem; na Pi kopia pierwotnej notatki
+`łączenia czujników.txt.poprzednia`). Kamera zewnętrzna CAM0, wewnętrzna CAM1.
+
+|Pin|BCM|Nakładka|Podłączenie|
+|-|-|-|-|
+|1, 17|3V3|3V3|BME280 ×2 VCC, mikrofon VDD|
+|2, 4|5V|5V|zasilanie Pi z przetwornicy (jeśli nie USB-C), XKC ×3 VCC|
+|3 / 5|GPIO2 / 3|SDA1 / SCL1|BME280 ×2 (I2C1): 0x76 w ulu (SDO→GND), 0x77 na zewnątrz (SDO→3V3)|
+|11, 13, 15|GPIO17, 27, 22|IO0, IO2, IO3|XKC-Y25-V nr 1 (dół), 2, 3 (góra) przez dzielnik 1 kΩ / 2 kΩ|
+|12, 35, 38|GPIO18, 19, 20|IO1, IO24, IO28|ICS43434 (I2S): SCK, WS, SD; L/R → GND|
+|32|GPIO12|IO26|serwo MG-996R – sygnał (sprzętowe PWM0 kanał 0)|
+|33|GPIO13|IO23|buzzer pasywny przez tranzystor NPN (PWM0 kanał 1)|
+|16|GPIO23|IO4|MOSFET naświetlaczy IR (włącz / wyłącz)|
+|10|GPIO15|RXD|SmartSolar VE.Direct TX – tylko gdy bez kabla VE.Direct–USB|
+|6, 9, 14, 20, 25, 30, 34, 39|GND|GND|wspólna masa wszystkiego|
+
+* XKC-Y25-V: zasilanie 5–24 V, wyjście ≈ napięcie zasilania → dzielnik 1 kΩ (od czujnika) / 2 kΩ (do GND)
+= 3,33 V na GPIO. Czarny przewód = tryb (do VCC albo GND odwraca wyjście). Poziom dokarmiaczki: 3 progi.
+* Serwo: osobna przetwornica 5–6 V ≥ 3 A (prąd zablokowania ~2,5 A – nie z pinu 5 V Pi), kondensator
+470–1000 µF przy serwie, masa wspólna z Pi.
+* Buzzer pasywny: GPIO13 → 1 kΩ → baza NPN (BC547 / 2N2222), buzzer między +12 V (albo 5 V) a kolektorem,
+1–2,2 kΩ równolegle do buzzera; ton z PWM ~2–4 kHz.
+* Mikrofon I2S: krótkie przewody (do ~20–30 cm). Nakładka systemowa do sprawdzenia przy wdrażaniu
+(`adau7002-simple` albo `googlevoicehat-soundcard`), nagrywanie `arecord` w podprocesie (bez nowych bibliotek).
+* SmartSolar: zalecany izolowany kabel VE.Direct–USB (`/dev/ttyUSB0`); alternatywa GPIO15 + `dtparam=uart0=on`
+(→ /dev/ttyAMA0), poziom TX sprawdzić miernikiem na pinie +V portu (5 V → dzielnik 1k/2k, 3,3 V → wprost).
+* Naświetlacze IR 3 W ×2 (płytki do kamery z fotorezystorem, zwykle zasilane 3,3 V przez otwory montażowe –
+przy oryginalnej kamerze dolutować przewody do pól + / − płytek): osobna przetwornica 3,3 V ≥ 2 A
+(pin 3V3 Pi tego nie uciągnie), sterowanie MOSFET logiczny po stronie masy z GPIO23 (100 Ω do bramki,
+10 kΩ bramka–GND). Napięcie zasilania sprawdzić na opisie płytek.
+* Zasilanie Pi: akumulator → bezpiecznik → przetwornica 5,1 V ≥ 5 A → USB-C (zalecane) albo piny 2/4 + GND.
+Bez USB-PD Pi 5 ogranicza USB do 600 mA – po upewnieniu się, że przetwornica daje 5 A: EEPROM `PSU_MAX_CURRENT=5000`.
+* PWM na Pi 5 (do sprawdzenia przy wdrażaniu): `dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4`,
+sterowanie przez `/sys/class/pwm` (biblioteka standardowa).
 
 ## Do zrobienia / otwarte
 
