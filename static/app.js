@@ -1149,6 +1149,7 @@
   // Parowanie i Wyłącz / Uruchom ponownie wołają te same przyciski co zakładka Działanie,
   // więc uprawnienia (PIN na wyświetlaczu, brak uprawnień na telefonie) sprawdzają się tak samo.
   const ICON_MOON = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+  const ICON_QR = '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20 14v.01M20 17v4h-3M14 20v1"/>';
   const THEMES = [
     ['bialy-pylek', 'Biały Pyłek', '#FFFFFF', '#FF8A00'],
     ['lekki-miodek', 'Lekki Miodek', '#FFF8E7', '#FF9E00'],
@@ -1158,13 +1159,17 @@
 
   $('tile-pair').addEventListener('click', () => $('btn-pair').click());
 
+  // Zasilanie. Telefon: zamiast „Uśpij ekran” – „Zgaś ekran ula” (wyświetlacz robi animację sam) oraz
+  // „Sparuj urządzenie” (tylko administrator; kod i zatwierdzenie na tym telefonie).
   $('tile-power').addEventListener('click', async () => {
     const box = document.createElement('div');
     box.className = 'power-options';
     [
       { value: 'shutdown', label: 'Wyłącz', icon: MODAL_ICONS.power, danger: true },
       { value: 'reboot', label: 'Uruchom ponownie', icon: MODAL_ICONS.update },
-      ...(sec.wyswietlacz ? [{ value: 'sleep', label: 'Uśpij ekran', icon: ICON_MOON }] : [])
+      sec.wyswietlacz ? { value: 'sleep', label: 'Uśpij ekran', icon: ICON_MOON }
+        : { value: 'sleep-remote', label: 'Zgaś ekran ula', icon: ICON_MOON },
+      ...(sec.wyswietlacz ? [] : [{ value: 'pair', label: 'Sparuj urządzenie', icon: ICON_QR }])
     ].forEach(o => {
       const b = document.createElement('button');
       b.type = 'button';
@@ -1179,6 +1184,19 @@
     if (r.value === 'sleep') setTimeout(sleepScreen, 300);          // po zamknięciu okna
     else if (r.value === 'reboot') $('btn-reboot').click();
     else if (r.value === 'shutdown') $('btn-shutdown').click();
+    else if (r.value === 'sleep-remote') {
+      try { await postJSON('/api/ekran/uspij'); showPopup('Ekran ula zgaśnie za chwilę. Dotyk ekranu go obudzi.', 5000, false); }
+      catch (e) { showPopup('Nie udało się zgasić ekranu ula: ' + e.message, 6000, false); }
+    } else if (r.value === 'pair') {
+      if (!isAdmin() && !sec.bez_zabezpieczen) {
+        noticeDialog({
+          icon: 'lock', title: 'Brak uprawnień',
+          text: 'Parowanie nowych urządzeń wymaga telefonu z uprawnieniami administratora.\nUprawnienia nadaje administrator: Ustawienia → Działanie → Urządzenia.'
+        });
+        return;
+      }
+      try { await pairStart(); } catch (e) { showPopup('Nie udało się: ' + e.message, 8000, false); }
+    }
   });
 
   function quickRow(label, control) {
@@ -1191,7 +1209,11 @@
     return row;
   }
 
-  $('tile-quick').addEventListener('click', async () => {
+  // Panel Estetyka: z menu głównego (z linkiem do Ustawień) i z zakładki Wygląd (strzałka, bez linku)
+  $('tile-quick').addEventListener('click', () => openAesthetics(true));
+  if ($('btn-aesthetics')) $('btn-aesthetics').addEventListener('click', () => openAesthetics(false));
+
+  async function openAesthetics(withLink) {
     const box = document.createElement('div');
     box.className = 'quick';
     if (sec.wyswietlacz) {
@@ -1228,13 +1250,21 @@
     toggle.firstChild.checked = !!settings.highContrast;
     toggle.firstChild.addEventListener('change', e => { onSettingChange('highContrast', e.target.checked); applySettingsToUI(); });
     box.appendChild(quickRow('Wysoki kontrast', toggle));
+    if (withLink) {
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'quick-link';
+      link.textContent = 'Przejdź do ustawień';
+      link.addEventListener('click', () => modalAnswer('settings'));
+      box.appendChild(link);
+    }
     const r = await askModal({
-      icon: false, title: 'Szybkie ustawienia', content: box,
-      buttons: [{ label: 'Zamknij', value: 'cancel' }, { label: 'Przejdź do ustawień', value: 'settings', kind: 'primary' }]
+      icon: false, title: 'Estetyka', content: box,
+      buttons: [{ label: 'Zamknij', value: 'cancel', kind: 'primary' }]
     });
     modalClose();
     if (r.value === 'settings') location.hash = '#ustawienia';
-  });
+  }
 
   /* ===== 15. EKRAN PRZY ULU: jasność i uśpienie (animacja jak gaszenie starego telewizora) ===== */
   // Jasność: czarna warstwa #dim (wyświetlacz na HDMI nie ma sterowania podświetleniem).
@@ -1325,8 +1355,13 @@
     try { applySecurity(await getJSON('/api/zabezpieczenia/stan')); } catch (e) { }
   }
 
+  let lastSleepRequest = null;     // licznik próśb telefonów o zgaszenie ekranu (tylko wyświetlacz)
   function applySecurity(s) {
     sec = s;
+    if (s.wyswietlacz && 'uspij' in s) {
+      if (lastSleepRequest !== null && s.uspij !== lastSleepRequest) sleepScreen();
+      lastSleepRequest = s.uspij;
+    }
     if (s.poziom === 'niesparowane') { location.reload(); return; }
     const where = s.wyswietlacz ? 'wyswietlacz' : 'telefon';
     document.body.dataset.poziom = s.poziom;
@@ -1600,7 +1635,10 @@
     return { row, input };
   }
 
-  bindAction('btn-pair', async () => {
+  // Parowanie: wyświetlacz (Działanie → Sparuj, kafelek Parowanie) albo telefon administratora (Zasilanie)
+  bindAction('btn-pair', () => pairStart());
+
+  async function pairStart() {
     modalBusy('wifi', 'Wczytuję dane Wi-Fi…', '');
     let info;
     try { info = await getJSON('/api/parowanie/wifi'); } catch (e) { info = { error: e.message }; }
@@ -1616,7 +1654,7 @@
     });
     if (r.value !== 'ok') { modalClose(); return; }
     await pairCode();
-  });
+  }
 
   async function pairCode() {
     modalBusy('phone', 'Tworzę kod parowania…', '');
@@ -1654,17 +1692,49 @@
     await pairDecision(res.prosba);
   }
 
+  // Prośba o parowanie trafia naraz na wyświetlacz i na każdy telefon administratora (stan z serwera:
+  // sec.prosba). Zatwierdzić może dowolne z nich; gdy decyzja zapadnie gdzie indziej, okno zamyka się samo
+  // (sec.prosba znika, sec.rozpatrzona mówi, jak skończyła się prośba). Gdy otwarte jest inne okno,
+  // czekamy, aż się zamknie – urządzenie, które pokazuje kod parowania, przechodzi do decyzji samo.
+  let pairShownId = null;
+  watchers.add(s => {
+    const p = s.prosba;
+    if (!p || p.id === pairShownId || (s.blokada || 0) > 0) return;
+    if ($('modal').classList.contains('open') || $('pin-modal').classList.contains('open')) return;
+    pairDecision(p).catch(e => showPopup('Nie udało się: ' + e.message, 8000, false));
+  });
+
   async function pairDecision(p) {
+    pairShownId = p.id;
+    if (nap.asleep) wakeScreen();                         // uśpiony wyświetlacz zapala się z prośbą
     const box = document.createElement('div');
     box.className = 'modal-toggles';
     const adm = toggleRow('Nadaj urządzeniu stałe uprawnienia administratora', 'Bez wymogu PIN-u, także zmiana PIN-u ula.', true);
     const rem = toggleRow('Zapamiętaj urządzenie', 'Wyłączone: ul zapomni urządzenie 10 minut po opuszczeniu strony lub rozłączeniu z siecią.', true);
     box.append(adm.row, rem.row);
-    const r = await askModal({
+    let watcher;
+    const gone = new Promise(res => {
+      watcher = s => { if (!s.prosba || s.prosba.id !== p.id) res({ value: 'gone', state: s }); };
+      watchers.add(watcher);
+    });
+    const r = await Promise.race([askModal({
       icon: 'phone', title: 'Nowe urządzenie', text: '*' + p.nazwa + '* chce połączyć się z ulem.', content: box,
       buttons: [{ label: 'Odrzuć', value: 'no' }, { label: 'Dodaj', value: 'ok', kind: 'primary' }]
-    });
+    }), gone]);
+    watchers.delete(watcher);
+    if (r.value === 'gone') {                               // rozpatrzone na innym urządzeniu albo wygasło
+      modalClose();
+      const d = r.state.rozpatrzona;
+      showPopup(d && d.id === p.id
+        ? (d.zgoda ? p.nazwa + ' zostało dodane na innym urządzeniu.' : 'Odrzucono ' + p.nazwa + ' na innym urządzeniu.')
+        : 'Prośba o parowanie ' + p.nazwa + ' wygasła.', 5000, false);
+      return;
+    }
+    if (r.value !== 'ok' && r.value !== 'no') { modalClose(); return; }   // zamknięte tylko na tym urządzeniu
     const yes = r.value === 'ok', admin = adm.input.checked;
+    // Wyświetlacz bez uprawnień administratora: najpierw PIN (decyzję serwer przyjmuje tylko od administratora)
+    if (sec.wyswietlacz && !isAdmin() && !sec.bez_zabezpieczen
+      && !await unlockPanel('Decyzja o parowaniu wymaga uprawnień administratora.')) { modalClose(); return; }
     modalBusy('phone', yes ? 'Dodaję urządzenie…' : 'Odrzucam…', '');
     try {
       await postJSON('/api/parowanie/decyzja', { prosba: p.id, zgoda: yes, admin, zapamietaj: rem.input.checked });

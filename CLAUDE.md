@@ -154,6 +154,27 @@ Samo po `SLEEP_AFTER` = 10 min bez dotyku, nie gdy Klucz jest w porcie. Start se
     * Blokada po błędnych PIN-ach na wyświetlaczu (`.lockout.is-display`): gradient #000 → #383838, bordowe
 akcenty (#9E1B32 ikona, #C8283F licznik), po `LOCKOUT_SHOW` = 10 s ekran gaśnie, dotyk budzi na kolejne 10 s.
 Telefony: wygląd blokady w swoim motywie, bez zmian.
+* **Poprawki estetyczne (2026-11-20):**
+    * **CAŁY interfejs ma się mieścić na wyświetlaczu 1024×600 bez przewijania** (wymóg użytkownika, powtórzony).
+Sprawdzanie: w każdej zakładce Ustawień i na stronie głównej `scrollHeight == clientHeight` dla `main`
+i `.settings-content` (skrypt w przeglądarce, viewport 1024×600, adres 127.0.0.1 = wyświetlacz).
+    * Czcionka: **Lexend** (zmienna 100–900, OFL) z `static/fonts/Lexend.ttf` przez `@font-face` – ul nie ma
+internetu, więc żadnych Google Fonts. Domyślna grubość `body` = 700 („domyślnie pogrubiona”).
+    * Kafelek „Szybkie ustawienia” → **„Estetyka”** z ikoną palety. Panel `openAesthetics(withLink)`: jasność
+(wyświetlacz), motyw, kontrast; „Przejdź do ustawień” = podkreślony wyśrodkowany link pod kontrastem
+(tylko z menu głównego); przycisk „Zamknij” w kolorach przycisku głównego.
+    * Wygląd: grupa „Kolorystyka” → „Estetyka” z jednym wierszem i okrągłą strzałką (`#btn-aesthetics`)
+otwierającą ten sam panel bez linku. Motyw / kontrast / jasność są już tylko w panelu (zwolnione miejsce).
+    * Telefon (`body[data-urzadzenie="telefon"]`): kafelki jako osobne karty (Ustawienia, Zasilanie, Estetyka).
+Zasilanie na telefonie: Wyłącz, Uruchom ponownie, Zgaś ekran ula, Sparuj urządzenie (2×2).
+    * Zgaś ekran ula z telefonu: `POST /api/ekran/uspij` od telefonu zwiększa `_screen["zadanie"]`, wyświetlacz
+widzi zmianę `uspij` w stanie i sam robi animację + wlopm.
+    * Parowanie: kod, Wi-Fi i decyzję może obsłużyć **każde urządzenie administratora** (`need()` zamiast
+`need(display=True)`). Prośba trafia naraz na wyświetlacz i telefony administratorów (watcher w sekcji 14e);
+decyzja gdziekolwiek zamyka okno wszędzie (`prosba` znika, `rozpatrzona` = {id, zgoda} przez 30 s).
+Wyświetlacz bez uprawnień: decyzja prosi o PIN. Zamknięcie tłem/Escape = tylko na tym urządzeniu.
+    * Kiosk: autostart `lwrespawn /bin/sh pi/kiosk.sh` (niezależnie od prawa wykonywania); skrypty w gicie 100755.
+Zmiana autostartu wymaga ponownego `sudo bash pi/instaluj.sh --blokada`.
 * Użytkownik ma wyświetlacz Pi obok siebie i widzi go na żywo — można go prosić o sprawdzenie ekranu.
 
 ## Uruchomienie

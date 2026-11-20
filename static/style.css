@@ -13,6 +13,16 @@
   display: none !important;
 }
 
+/* Czcionka Lexend z pliku w static/fonts (ul nie ma internetu). Czcionka zmienna: wszystkie grubości 100–900
+   w jednym pliku. Licencja SIL Open Font License 1.1 (zapisana w samym pliku). */
+@font-face {
+  font-family: "Lexend";
+  src: url("fonts/Lexend.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Przyciski i pola nie dziedziczą czcionki same z siebie – bez tego mają systemową */
 button,
 input,
@@ -36,7 +46,7 @@ textarea {
   --dock-border: rgba(255, 255, 255, 0.5);
   --radius: 20px;
   --shadow: 0 4px 20px rgba(15, 15, 16, .04);
-  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font: "Lexend", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
   /* ===== ANIMACJE i WYKRESY – wartości ustawiasz w data/global.conf, sekcja [wyglad].
      Te poniżej to tylko zapas, gdy strona jest otwarta bez serwera. ===== */
@@ -158,7 +168,7 @@ body[data-contrast="high"][data-theme="miodna-szarosc"] {
 /* ---------- Bazowe ---------- */
 body {
   font-family: var(--font);
-  font-weight: 600;
+  font-weight: 700;          /* Lexend domyślnie pogrubiony (życzenie użytkownika) */
   color: var(--black);
   background: var(--bg);
   line-height: 1.4;
@@ -3313,4 +3323,83 @@ html.crt-off body {
 
 .lockout.is-display .lockout-timer {
   color: #C8283F;
+}
+
+/* ---------- PANEL ESTETYKA: link do Ustawień pod „Wysoki kontrast” ---------- */
+.quick-link {
+  align-self: center;
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  color: var(--orange-dark);
+  font: 800 14px/1.2 var(--font);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* Okrągły przycisk ze strzałką (Wygląd → Estetyka) */
+.arrow-btn {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--orange-soft);
+  color: var(--orange-dark);
+  cursor: pointer;
+  transition: filter .2s, transform .15s;
+}
+
+.arrow-btn:hover {
+  filter: brightness(.95);
+}
+
+.arrow-btn:active {
+  transform: scale(.94);
+}
+
+.arrow-btn svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Zasilanie z czterema opcjami (telefon): 2 × 2 */
+.power-options:has(> :nth-child(4)) {
+  grid-template-columns: 1fr 1fr;
+}
+
+/* ---------- TELEFON I KOMPUTER: kafelki jako osobne karty (jak reszta menu głównego) ---------- */
+body[data-urzadzenie="telefon"] .dash-card.quad {
+  gap: 20px;
+  padding: 0;
+  overflow: visible;
+  border: none;
+  background: none;
+  box-shadow: none;
+}
+
+body[data-urzadzenie="telefon"] .quad-tile {
+  gap: 10px;
+  overflow: visible;
+  border: 4px solid var(--orange-dark);
+  border-radius: var(--radius);
+  background: var(--card-background);
+  box-shadow: var(--shadow);
+  font-size: clamp(14px, 1.7vw, 19px);
+  transition: transform .2s, border-color .2s, box-shadow .25s, background .3s;
+}
+
+body[data-urzadzenie="telefon"] .quad-tile:hover {
+  transform: translateY(var(--hover-lift));
+  border-color: var(--orange);
+  background: var(--card-background);
+  box-shadow: var(--hover-glow), 0 0 0 3px var(--hover-ring);
 }

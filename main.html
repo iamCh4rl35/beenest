@@ -131,9 +131,10 @@
             </button>
             <button type="button" class="quad-tile" id="tile-quick">
               <svg viewBox="0 0 24 24">
-                <path d="M3 8h4M11 8h10M3 16h10M17 16h4" /><circle cx="9" cy="8" r="2" /><circle cx="15" cy="16" r="2" />
+                <circle cx="13.5" cy="6.5" r=".5" /><circle cx="17.5" cy="10.5" r=".5" /><circle cx="8.5" cy="7.5" r=".5" /><circle cx="6.5" cy="12.5" r=".5" />
+                <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" />
               </svg>
-              <span>Szybkie ustawienia</span>
+              <span>Estetyka</span>
             </button>
           </div>
 
@@ -396,43 +397,20 @@
           <!-- WYGLĄD -->
           <div id="settings-appearance" class="settings-panel active">
             <div class="setting-group">
-              <div class="setting-group-title">Kolorystyka</div>
+              <div class="setting-group-title">Estetyka</div>
+              <!-- Motyw, kontrast i jasność są w panelu Estetyka (ten sam co w menu głównym, app.js -> openAesthetics) -->
               <div class="setting-row">
                 <div>
-                  <div class="setting-label">Motyw</div>
-                  <div class="setting-desc">Wybierz ogólny wygląd aplikacji.</div>
-                </div>
-                <div class="setting-control">
-                  <select id="theme-select">
-                    <option value="bialy-pylek">Biały Pyłek</option>
-                    <option value="lekki-miodek">Lekki Miodek</option>
-                    <option value="nocna-czern">Nocna Czerń</option>
-                    <option value="miodna-szarosc">Miodna Szarość</option>
-                  </select>
-                </div>
-              </div>
-              <div class="setting-row">
-                <div>
-                  <div class="setting-label">Wysoki kontrast</div>
-                  <div class="setting-desc">Zwiększa czytelność poprzez mocniejsze różnice kolorów.</div>
-                </div>
-                <div class="setting-control">
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="contrast-toggle">
-                    <span class="slider"></span>
-                  </label>
-                </div>
-              </div>
-              <div class="setting-row" data-only="wyswietlacz">
-                <div>
-                  <div class="setting-label">Jasność ekranu</div>
-                  <div class="setting-desc">Przyciemnia wyświetlacz przy ulu.</div>
-                </div>
-                <div class="setting-control">
-                  <div class="range-box">
-                    <input type="range" class="range" id="brightness-range" min="1" max="100" step="1" aria-label="Jasność ekranu">
-                    <span class="range-value" id="brightness-value">100 %</span>
+                  <div class="setting-label">Motyw i kontrast</div>
+                  <div class="setting-desc">
+                    <span data-only="wyswietlacz">Kolory aplikacji, wysoki kontrast i jasność ekranu.</span>
+                    <span data-only="telefon">Kolory aplikacji i wysoki kontrast.</span>
                   </div>
+                </div>
+                <div class="setting-control">
+                  <button type="button" class="arrow-btn" id="btn-aesthetics" aria-label="Otwórz panel Estetyka">
+                    <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>
+                  </button>
                 </div>
               </div>
             </div>
@@ -840,7 +818,7 @@
       </form>
       <div class="pair-wait" id="pair-wait" hidden>
         <div class="modal-spinner"></div>
-        <p class="lead">Czekam na zatwierdzenie na wyświetlaczu ula…</p>
+        <p class="lead">Czekam na zatwierdzenie na wyświetlaczu ula albo na telefonie administratora…</p>
       </div>
     </div>
   </div>

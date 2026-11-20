@@ -1120,21 +1120,29 @@ def security_state(w):
         return s
     s["blokada"] = round(lock_left(), 2)
     s["pin_ustawiony"] = bool(pin_hash())
+    code, req = _sec["code"], _sec["request"]
+    pairing = {"kod": round(code["until"] - now) if code and now < code["until"] else 0,
+               "prosba": {"id": req["id"], "nazwa": req["nazwa"]}
+               if req and req["decision"] is None and now < req["until"] else None,
+               # jak skończyła się ostatnia prośba – pozostałe urządzenia zamykają okno z właściwym komunikatem
+               "rozpatrzona": {"id": done["id"], "zgoda": done["zgoda"]}
+               if (done := _sec.get("decided")) and now < done["until"] else None}
     if w["wyswietlacz"]:
         conf = _load_conf()["admin"]
-        code, req, dup = _sec["code"], _sec["request"], _sec["dup"]
+        dup = _sec["dup"]
         s.update(
+            pairing,
             admin_do=round(max(0.0, _sec["admin_until"] - now)) if w["przez"] == "pin" else 0,
             klucz={"ustawiony": bool(conf.get("klucz")), "wpiety": key_present(),
                    "zdarzenie": _usb["event"], "typ": _usb["event_type"]},
             usb=[{"nazwa": x["nazwa"], "rozmiar": x["rozmiar"], "klucz": x["klucz"]} for x in _usb["sticks"]],
-            kod=round(code["until"] - now) if code and now < code["until"] else 0,
-            prosba={"id": req["id"], "nazwa": req["nazwa"]}
-            if req and req["decision"] is None and now < req["until"] else None,
             duplikowanie=bool(dup and now < dup["until"]),
+            uspij=_screen["zadanie"],          # zmiana licznika = telefon kazał zgasić ekran
         )
     else:
         s["urzadzenie"] = {"nazwa": w.get("nazwa"), "zapamietane": w.get("zapamietane", False)}
+        if w["poziom"] == ADMIN:               # telefon administratora też może parować nowe urządzenia
+            s.update(pairing)
     return s
 
 
@@ -1308,10 +1316,19 @@ def api_shutdown():
 
 
 # ---- Uśpienie ekranu (tylko wyświetlacz; animację i zasłonę rysuje strona, tu samo zasilanie obrazu)
+_screen = {"zadanie": 0}     # licznik próśb telefonów o zgaszenie ekranu ula (odczytuje wyświetlacz)
+
+
 @app.post("/api/ekran/uspij")
 def api_screen_sleep():
-    if (bad := json_only() or need(admin=False, display=True)):
+    """Wyświetlacz: gasi obraz. Telefon (każdy sparowany): prosi wyświetlacz, żeby się uśpił – ten przy
+    najbliższym odczycie stanu (co sekundę) pokazuje animację i sam gasi obraz."""
+    if (bad := json_only()):
         return bad
+    if not g.who["wyswietlacz"]:
+        _screen["zadanie"] += 1
+        log(f"{g.who.get('nazwa') or request.remote_addr}: zgaszenie ekranu ula")
+        return jsonify(ok=True, zdalnie=True)
     return jsonify(ok=True, wylaczony=screen_power(False))
 
 
@@ -1434,10 +1451,10 @@ def api_change_pin():
     return jsonify(ok=True)
 
 
-# ---- Parowanie: krok 1 Wi-Fi, krok 2 kod, krok 3 decyzja na wyświetlaczu
+# ---- Parowanie: krok 1 Wi-Fi, krok 2 kod, krok 3 decyzja (wyświetlacz albo telefon administratora)
 @app.route("/api/parowanie/wifi")
 def api_pair_wifi():
-    if (bad := need(display=True)):
+    if (bad := need()):
         return bad
     wifi, problem = hotspot_wifi()
     return jsonify(wifi=wifi, error=problem)
@@ -1446,7 +1463,7 @@ def api_pair_wifi():
 @app.post("/api/parowanie/kod")
 def api_pair_code():
     """Nowy jednorazowy kod (QR z adresem + 6 cyfr), ważny PAIR_CODE_TIME s. Poprzedni przestaje działać."""
-    if (bad := json_only() or need(display=True)):
+    if (bad := json_only() or need()):
         return bad
     token = secrets.token_urlsafe(16)
     digits = "".join(secrets.choice("0123456789") for _ in range(6))
@@ -1458,13 +1475,19 @@ def api_pair_code():
 
 @app.post("/api/parowanie/anuluj")
 def api_pair_cancel():
-    if (bad := json_only() or need(admin=False, display=True)):
+    if (bad := json_only() or (None if g.who["wyswietlacz"] else need())):
         return bad
     with _sec_lock:
         _sec["code"] = None
         if _sec["request"] and _sec["request"]["decision"] is None:
             _sec["request"]["decision"] = "nie"
+            note_decision(_sec["request"], False)
     return jsonify(ok=True)
+
+
+def note_decision(req, agreed):
+    """Zapamiętuje na 30 s, jak rozpatrzono prośbę (stan dla pozostałych urządzeń administratora)."""
+    _sec["decided"] = {"id": req["id"], "zgoda": agreed, "until": time.time() + 30}
 
 
 @app.post("/api/parowanie/zglos")
@@ -1529,8 +1552,9 @@ def api_pair_status():
 
 @app.post("/api/parowanie/decyzja")
 def api_pair_decision():
-    """Wyświetlacz: Dodaj / Odrzuć oraz przełączniki "stałe uprawnienia administratora" i "zapamiętaj urządzenie"."""
-    if (bad := json_only() or need(display=True)):
+    """Wyświetlacz albo telefon administratora: Dodaj / Odrzuć oraz przełączniki "stałe uprawnienia
+    administratora" i "zapamiętaj urządzenie"."""
+    if (bad := json_only() or need()):
         return bad
     data = request.get_json(silent=True) or {}
     with _sec_lock:
@@ -1539,6 +1563,8 @@ def api_pair_decision():
             return jsonify(error="Ta prośba o parowanie już wygasła."), 410
         if data.get("zgoda") is not True:
             req["decision"] = "nie"
+            note_decision(req, False)
+            log(f"odrzucono prośbę o parowanie: {req['nazwa']} ({g.who.get('nazwa') or 'wyświetlacz'})")
             return jsonify(ok=True)
         admin, remember = data.get("admin") is True, data.get("zapamietaj") is True
         did = secrets.token_urlsafe(16)
@@ -1557,6 +1583,7 @@ def api_pair_decision():
         else:
             _sec["temp"][did] = {"nazwa": req["nazwa"], "admin": admin, "last": time.time()}
         req.update(decision="tak", device=did, remember=remember)
+        note_decision(req, True)
     log(f"sparowano: {req['nazwa']} (" + ("administrator" if admin else "użytkownik")
         + (", zapamiętane" if remember else ", na czas wizyty") + ")")
     return jsonify(ok=True)

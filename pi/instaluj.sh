@@ -52,7 +52,7 @@ kiosk_config() {
 /usr/bin/kanshi &
 # Logo jako tło, zanim Chromium wczyta panel (Plymouth znika już ok. 7 s po starcie, panel jest ok. 14 s)
 /usr/bin/swaybg -c '#000000' -m fit -i /usr/share/plymouth/themes/beenest/splash.png &
-/usr/bin/lwrespawn $PI_DIR/kiosk.sh &
+/usr/bin/lwrespawn /bin/sh $PI_DIR/kiosk.sh &   # przez sh – działa bez prawa wykonywania pliku
 EOF
     local layout options keys mouse
     layout=$(grep -h "^XKB_DEFAULT_LAYOUT=" "$USER_LABWC/environment" 2>/dev/null | tail -1 | cut -d= -f2)
