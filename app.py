@@ -46,7 +46,7 @@ import threading
 import time
 
 import flask.cli
-from flask import Flask, Response, g, jsonify, render_template, request, session
+from flask import Flask, Response, g, jsonify, redirect, render_template, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.serving import WSGIRequestHandler
 from werkzeug.wsgi import ClosingIterator
@@ -136,6 +136,7 @@ DEVICE_SETTINGS = {
     "feederData":        ("poziom", {"poziom", "ostatnie"}),
     "feederAlarm":       (True, None),
     "camera":            ("external", {"external", "internal"}),
+    "brightness":        ("100", {str(v) for v in range(20, 101, 10)}),   # % – tylko wyświetlacz przy ulu
 }
 # Ustawienia urządzenia z zakładki Działanie – jak cała ta zakładka zmienia je tylko administrator
 ADMIN_DEVICE_SETTINGS = {"feederAlarm"}
@@ -168,6 +169,8 @@ REMEMBER_DAYS = 365         # ważność ciasteczka zapamiętanego urządzenia (
 KEY_FILE = "beenest.klucz"  # plik z sekretem na pendrivie (Klucz)
 HOTSPOT_CONNECTION = "Pi-hotspot"   # połączenie NetworkManagera z hotspotem (nazwa sieci i hasło do kodu QR)
 DISPLAY_ADDRESSES = ("127.0.0.1", "::1")   # wyświetlacz przy ulu = przeglądarka na samym Raspberry
+HOTSPOT_PREFIX = "10.42.0."                # adresy telefonów w hotspocie NetworkManagera
+DHCP_NAMES = "/run/beenest-dhcp"           # nazwy urządzeń z DHCP hotspotu (plik = adres IP; pi/instaluj.sh)
 NO_SECURITY = os.environ.get("BEENEST_BEZ_ZABEZPIECZEN") == "1"   # testy na PC: każdy jest administratorem
 
 # -------------------------------------------------------------
@@ -481,6 +484,21 @@ def device_label(req):
 def clean_name(text):
     """Nazwa urządzenia do global.conf: jedna linijka, bez nawiasów sekcji, najwyżej 40 znaków."""
     return re.sub(r"\s+", " ", re.sub(r"[\x00-\x1f\[\]=:#;]", " ", str(text or ""))).strip()[:40]
+
+
+def network_name(ip):
+    """
+    Nazwa, pod którą urządzenie przedstawiło się w DHCP hotspotu (np. „Pixel-9-Pro-Karol” → „Pixel 9 Pro Karol”).
+    Myślniki zamiast spacji to wymóg DHCP – nawiasów z nazwy telefonu nie da się odtworzyć.
+    """
+    if not re.fullmatch(r"[\d.]+", ip or ""):
+        return ""
+    try:
+        with open(os.path.join(DHCP_NAMES, ip), encoding="utf-8", errors="replace") as f:
+            raw = f.read().strip()
+    except OSError:
+        return ""
+    return clean_name(re.sub(r"[-_]+", " ", raw))
 
 
 # -------------------------------------------------------------
@@ -816,6 +834,34 @@ def run_system_command(args, timeout=60):
                           check=True, timeout=timeout)
 
 
+def on_raspberry():
+    try:
+        with open("/proc/device-tree/model", encoding="ascii", errors="replace") as f:
+            return "Raspberry Pi" in f.read()
+    except OSError:
+        return False
+
+
+def screen_power(on, quiet=False):
+    """
+    Wyświetlacz przy ulu: wyłącza / włącza obraz przez wlopm (zasilanie wyjścia w labwc; panel bez sygnału
+    gasi podświetlenie). Tylko na Raspberry – na komputerze z testami nie gasimy cudzego monitora.
+    True = udało się; bez wlopm strona i tak zasłania ekran czernią.
+    """
+    if not on_raspberry() or not shutil.which("wlopm"):
+        return False
+    env = {**os.environ, "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
+           "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", "wayland-0")}
+    try:
+        subprocess.run(["wlopm", "--on" if on else "--off", "*"], env=env,
+                       capture_output=True, text=True, timeout=5, check=True)
+        return True
+    except (OSError, subprocess.SubprocessError) as e:
+        if not quiet:
+            log(f"wlopm: nie udało się {'włączyć' if on else 'wyłączyć'} ekranu: {error_text(e)}")
+        return False
+
+
 def power(action):
     if not sys.platform.startswith("linux"):
         raise OSError("Zasilanie można sterować tylko na Raspberry Pi (Linux)")
@@ -1055,8 +1101,8 @@ def hotspot_wifi():
 def pairing_address():
     """Adres, pod którym telefon w hotspocie znajdzie ul (do kodu QR)."""
     ips, main_ip = lan_addresses(), primary_address()
-    if "10.42.0.1" in ips:                   # hotspot NetworkManagera na Raspberry Pi
-        host = "10.42.0.1"
+    if HOTSPOT_PREFIX + "1" in ips:          # hotspot na Raspberry Pi: beenest.local (DNS hotspotu i avahi)
+        host = MDNS_NAME + ".local"
     elif main_ip in ips:
         host = main_ip
     else:
@@ -1092,7 +1138,28 @@ def security_state(w):
 
 
 # Bez parowania dostępne są tylko te widoki (reszta: 401)
-OPEN_ENDPOINTS = {"index", "static", "api_security_state", "api_pair_claim", "api_pair_status"}
+OPEN_ENDPOINTS = {"index", "static", "api_security_state", "api_pair_claim", "api_pair_status",
+                  "connectivity_check"}
+
+
+@app.before_request
+def one_address():
+    """
+    Telefon w hotspocie zawsze na http://beenest.local. Ciasteczko parowania przeglądarka przypisuje do nazwy
+    z paska adresu – wejście raz przez 10.42.0.1, a raz przez beenest.local „gubiło” sparowane urządzenie.
+    Dotyczy tylko otwarcia strony (GET /); testy łączności telefonów i API zostają bez zmian.
+    """
+    if (request.method == "GET" and request.path == "/" and (request.remote_addr or "").startswith(HOTSPOT_PREFIX)
+            and request.host.split(":")[0].lower() != MDNS_NAME + ".local"):
+        seen = (request.remote_addr, request.host)
+        if seen not in _redirected:                # jedna linia na urządzenie i nazwę – widać pętle przekierowań
+            _redirected.add(seen)
+            log(f"przekierowuję {request.remote_addr} z „{request.host}” na {MDNS_NAME}.local "
+                f"(przez: {request.headers.get('Via', '-')}, {request.headers.get('User-Agent', '')[:80]})")
+        return redirect(url(MDNS_NAME + ".local") + "/", 302)
+
+
+_redirected = set()
 
 
 @app.before_request
@@ -1111,7 +1178,34 @@ def index():
     ip = request.remote_addr
     return render_template("main.html", look_css=look_css(), auth=security_state(g.who),
                            device={"settings": {**get_server_settings(), **get_device_settings(ip)},
-                                   "known": known_device(ip)})
+                                   "known": known_device(ip), "nazwa_sieciowa": network_name(ip)})
+
+
+# -------------------------------------------------------------
+#  Testy łączności telefonów (hotspot bez internetu)
+#  Na hotspocie dnsmasq kieruje każdą nazwę na Raspberry (pi/instaluj.sh), więc telefon pytający
+#  „czy jest internet?” trafia tutaj i dostaje odpowiedź, jakiej się spodziewa.
+#  Sprawdzenia przez HTTPS (Android robi je równolegle) nie da się podrobić bez certyfikatu Google.
+# -------------------------------------------------------------
+APPLE_SUCCESS = "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"
+CONNECTIVITY_CHECKS = {
+    "/generate_204": ("", 204),                         # Android, Chrome
+    "/gen_204": ("", 204),
+    "/hotspot-detect.html": (APPLE_SUCCESS, 200),       # iPhone, iPad, macOS
+    "/library/test/success.html": (APPLE_SUCCESS, 200),
+    "/connecttest.txt": ("Microsoft Connect Test", 200),  # Windows 10 / 11
+    "/ncsi.txt": ("Microsoft NCSI", 200),
+    "/success.txt": ("success\n", 200),                 # Firefox
+}
+
+
+def connectivity_check():
+    body, status = CONNECTIVITY_CHECKS[request.path]
+    return Response(body, status, mimetype="text/html" if body.startswith("<") else "text/plain")
+
+
+for _path in CONNECTIVITY_CHECKS:
+    app.add_url_rule(_path, "connectivity_check", connectivity_check)
 
 
 @app.route("/api/data")
@@ -1210,6 +1304,21 @@ def api_shutdown():
     except Exception as e:
         return jsonify(error=error_text(e)), 500
     return jsonify(ok=True)
+
+
+# ---- Uśpienie ekranu (tylko wyświetlacz; animację i zasłonę rysuje strona, tu samo zasilanie obrazu)
+@app.post("/api/ekran/uspij")
+def api_screen_sleep():
+    if (bad := json_only() or need(admin=False, display=True)):
+        return bad
+    return jsonify(ok=True, wylaczony=screen_power(False))
+
+
+@app.post("/api/ekran/obudz")
+def api_screen_wake():
+    if (bad := json_only() or need(admin=False, display=True)):
+        return bad
+    return jsonify(ok=True, wlaczony=screen_power(True))
 
 
 @app.post("/api/history/clear")
@@ -1366,7 +1475,8 @@ def api_pair_claim():
         return jsonify(error="To urządzenie jest już sparowane z ulem"), 409
     data = request.get_json(silent=True) or {}
     token, digits = str(data.get("token") or ""), str(data.get("kod") or "")
-    name = clean_name(data.get("nazwa")) or clean_name(device_label(request)) or "Telefon"
+    name = (clean_name(data.get("nazwa")) or network_name(request.remote_addr)
+            or clean_name(device_label(request)) or "Telefon")
     now = time.time()
     with _sec_lock:
         code, req = _sec["code"], _sec["request"]
@@ -1434,6 +1544,12 @@ def api_pair_decision():
         if remember:
             with _conf_lock:
                 conf = _load_conf()
+                # Ta sama nazwa = to samo urządzenie parowane ponownie (np. po wyczyszczeniu przeglądarki):
+                # stary wpis znika, żeby na liście nie było dwóch „Pixel 9 Pro Karol”.
+                for old in [k for k, d in conf["paired"].items() if d["nazwa"].casefold() == req["nazwa"].casefold()]:
+                    del conf["paired"][old]
+                    _sec["seen"].pop(old, None)
+                    log(f"ponowne parowanie: zastępuję poprzedni wpis „{req['nazwa']}”")
                 conf["paired"][did] = {"nazwa": req["nazwa"], "admin": admin,
                                        "dodano": time.strftime("%Y-%m-%d %H:%M")}
                 _save_conf()
@@ -1609,6 +1725,12 @@ if __name__ == "__main__":
     if not DEBUG or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         start_sampler()
         threading.Thread(target=usb_loop, name="usb", daemon=True).start()
+        # Po restarcie serwera strona nie pamięta uśpienia – obraz musi być włączony, inaczej dotyk
+        # klikałby w ciemno. Sesja graficzna wstaje po serwerze, więc próbujemy też chwilę później.
+        screen_power(True, quiet=True)
+        later = threading.Timer(30, screen_power, args=(True, True))
+        later.daemon = True                 # nie wstrzymuje zamknięcia serwera
+        later.start()
         if NO_SECURITY:
             log("UWAGA: BEENEST_BEZ_ZABEZPIECZEN=1 – każde urządzenie jest administratorem (tylko do testów)")
         elif not pin_hash():

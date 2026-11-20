@@ -20,6 +20,133 @@ Traktuj każdy punkt jako wymaganie i sprawdź na końcu, że wszystkie są spe�
 w sterownikach bywają zakomentowane. Nie odkomentowuj ich bez pytania.
 * Repozytorium: https://github.com/iamCh4rl35/beenest
 
+## Miejsca operacji
+
+* PC (Arch Linux): `/home/karolkubik/Dokumenty/Projekty/BEENest` — główny katalog projektu.
+* Raspberry Pi 5 8 GB (Raspberry Pi OS na Debianie 13 trixie, hostname `raspberrypi`):
+`ssh beenest@192.168.1.219`, katalog **`/home/beenest/BEENest`** (tak jak na PC; nie „BEEnest”) — kopia na właściwej maszynie.
+Na Pi jest też `~/bme-env` (prawdopodobnie środowisko Pythona do BME280).
+* SSH: klucz PC `~/.ssh/id_ed25519` dodany na Pi (`ssh-copy-id`, 2026-11-20). Claude łączy się z `-o BatchMode=yes`.
+* Pulpit Pi: Wayland, kompozytor **labwc**, gniazdo `wayland-0`. Program graficzny przez SSH:
+`export WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/$(id -u); nohup chromium --ozone-platform=wayland >/tmp/chromium-ssh.log 2>&1 &`
+— bez `--ozone-platform=wayland` Chromium szuka X-serwera i kończy się błędem „Missing X server or $DISPLAY”.
+* Powłoka użytkownika na Pi to **fish** — dłuższe polecenia przez `ssh ... bash -s <<'EOF' ... EOF`.
+* **sudo na Pi wymaga hasła** — Claude nie robi zmian systemowych sam; daje użytkownikowi komendę
+`ssh -t beenest@192.168.1.219 sudo bash BEENest/pi/instaluj.sh` do uruchomienia w terminalu.
+* Synchronizacja PC → Pi: `scp` zmienionych plików (Pi ma też repozytorium git; przed `git pull` na Pi
+może być potrzebne `git checkout -- <plik>`). Sprawdzanie zgodności: `md5sum`.
+* LAN (eth0) to połączenie do zarządzania. Użytkownik wyłączał Wi-Fi, bo połączenie klienckie
+„Pixel 9 Pro (Karol)” psuło LAN; hotspot (tryb `shared`) nie daje trasy domyślnej, więc LAN-u nie rusza.
+* Wyświetlacz: HDMI-A-2, 1024×600, dotyk „WaveShare WS170120” (wpis `<touch>` w `~/.config/labwc/rc.xml`).
+
+## Konfiguracja Raspberry (`pi/`)
+
+* `pi/instaluj.sh` (sudo, wielokrotnie): Wi-Fi włączone, hotspot `Pi-hotspot` (SSID „BEENest Access Web”,
+autostart, priorytet 100, 10.42.0.1), DNS hotspotu `address=/#/10.42.0.1` w
+`/etc/NetworkManager/dnsmasq-shared.d/beenest.conf`, usługa `beenest.service` (użytkownik beenest,
+`CAP_NET_BIND_SERVICE` na port 80, `/etc/sudoers.d/beenest` pozwala na `shutdown`), motyw Plymouth
+`beenest` z `pi/logo-startowe.png` (+ `logo.nologo`, `vt.global_cursor_default=0`, `disable_splash=1`).
+Kopie oryginałów: `*.przed-beenest`.
+* **Kiosk = osobna sesja lightdm `beenest-kiosk`** (`autologin-session` w `/etc/lightdm/lightdm.conf`):
+`/usr/local/bin/beenest-kiosk` → `labwc -C /etc/beenest/labwc` (autostart: kanshi + `lwrespawn pi/kiosk.sh`).
+Powód: sesja pulpitu `labwc-pi` uruchamia labwc z `-m` (łączy konfigurację użytkownika z `/etc/xdg/labwc`),
+więc wpis w `~/.config/labwc/autostart` dokładał kiosk do pulpitu, a skrótów systemowych nie dało się usunąć.
+`--pulpit` przełącza autologowanie z powrotem na `rpd-labwc` (pulpit użytkownika nietknięty).
+* `--blokada`: brak getty (logind `NAutoVTs=0`, maska getty@tty1 i serial-getty@ttyAMA10, bez `console=tty1`),
+w `/etc/beenest/labwc`: `XKB_DEFAULT_OPTIONS=srvrkeys:none` (Ctrl+Alt+Fn nic nie robi) i rc.xml bez skrótów
+i menu; zasady Chromium (`/etc/chromium/policies/managed/beenest.json`: tylko http://127.0.0.1, bez narzędzi
+programisty, plików, pobierania), `kernel.sysrq=0`. **SSH zostaje z hasłem użytkownika beenest**
+(życzenie użytkownika, 2026-11-20 — nie wyłączać `PasswordAuthentication`). `--odblokuj` cofa blokadę.
+* Kursor ukryty (ekran dotykowy): motyw `/usr/share/icons/beenest-bez-kursora` — jeden przezroczysty plik
+Xcursor 24×24 (generowany w Pythonie w skrypcie) podlinkowany pod nazwami wszystkich kursorów z PiXtrix,
+Adwaita i default; `XCURSOR_THEME` w `/etc/beenest/labwc/environment`. Sprawdzanie: `grim -c` (z kursorem).
+* Ekran „Configuring this Raspberry Pi 5…” przed logo = instalator sieciowy bootloadera
+(`NET_INSTALL_AT_POWER_ON=1` w EEPROM). Skrypt ustawia 0 przez `rpi-eeprom-config --apply` (wchodzi po restarcie).
+Firmware Pi 5 jest w EEPROM, nie w `/boot/firmware` — tego napisu nie ma na dysku.
+* `pi/kiosk.sh`: Chromium `--kiosk --password-store=basic` (bez pytania o pęk kluczy), czeka na serwer,
+kasuje „przywróć karty” po odcięciu prądu i usuwa `~/.config/chromium/Singleton*` przed startem
+(blokada zawiera nazwę komputera — po zmianie raspberrypi → beenest Chromium pokazał „profil używany
+przez inny proces na innym komputerze”). `kiosk.sh` należy do beenest, więc wdrożenie = `scp` + `pkill chromium`.
+* „Fałszywy internet”: `CONNECTIVITY_CHECKS` w `app.py` (generate_204, hotspot-detect.html, connecttest.txt,
+ncsi.txt, success.txt; w `OPEN_ENDPOINTS`). iPhone / Windows / Firefox uznają sieć za internetową;
+Android robi też sprawdzenie HTTPS, którego nie da się podrobić → najwyżej „ograniczone połączenie”.
+* Stan 2026-11-20: `instaluj.sh` uruchomiony raz (bez blokady). Hotspot wstał (wlan0 = Pi-hotspot, LAN
+dalej trasą domyślną), DNS hotspotu odpowiada 10.42.0.1 na każdą nazwę, kiosk i logo ustawione.
+Usługa padała: `data/global.conf` i `data/secret.key` należały do roota (wcześniej `sudo python3 app.py`)
+→ skrypt robi teraz `chown -R` katalogu aplikacji. Po `chown` serwer działa (index 200, generate_204 → 204,
+hotspot-detect.html → Success, `/api/data` z hotspotu → 401), kiosk widoczny na ekranie (zrzut: `grim`).
+Pod kioskiem działał jeszcze pulpit → przepisane na osobną sesję. Po restarcie (20:20) działa tylko
+`labwc -C /etc/beenest/labwc` + Chromium, bez wf-panel-pi i pcmanfm; panel ula na całym ekranie.
+Logo startowe potwierdzone przez użytkownika. **Blokada włączona 2026-11-20 20:40** (`--blokada`):
+getty zamaskowane, `console=tty1` usunięte, `srvrkeys:none`, rc.xml kiosku bez skrótów, zasady Chromium,
+sysrq=0, EEPROM `NET_INSTALL_AT_POWER_ON=0`, kursor przezroczysty; SSH nadal przyjmuje hasło i klucz.
+* Oś startu (2026-11-20): Plymouth 3,2–6,7 s → lightdm/labwc ~7 s → Chromium ~10 s → panel ~13–14 s.
+Przy zimnym starcie użytkownik widział tylko czarny ekran ~10 s (logo tylko przy restarcie — monitor
+budzi się za późno na krótkie okno Plymoutha). Rozwiązanie: `swaybg -m fit -i .../beenest/splash.png`
+jako tło w autostarcie kiosku (swaybg jest w systemie). Wdrożone i po zimnym starcie swaybg działa od
+startu sesji (Plymouth 3,4–6,8 s, Chromium 12,8 s); użytkownik potwierdził: logo widać aż do panelu.
+* Uwaga (niepoprawione): serwer startuje przed hotspotem, więc w logu „nie znalazłem adresu IP”
+i `beenest.local` nie jest rozgłaszane przez zeroconf; na hotspocie nazwę i tak rozwiązuje dnsmasq.
+* **Parowanie i adresy (2026-11-20):**
+    * Ciasteczko parowania przeglądarka wiąże z nazwą z paska adresu → wejście przez 10.42.0.1 i przez
+beenest.local to dla niej dwa różne miejsca („gubienie” urządzenia). Dlatego `one_address()` w `app.py`:
+GET `/` z hotspotu (`HOTSPOT_PREFIX`) pod inną nazwą niż beenest.local → 302 na `http://beenest.local/`.
+Kod QR (`pairing_address`) przy hotspocie daje beenest.local.
+    * Nazwa komputera Pi ma być **`beenest`** (avahi rozgłasza beenest.local na każdym interfejsie; zeroconf
+w app.py nie widział hotspotu, bo ten wstaje po serwerze). Ustawia ją `instaluj.sh`.
+    * Hasło hotspotu było puste w QR: usługa bez sesji nie miała prawa `nmcli -s` → reguła polkit
+`/etc/polkit-1/rules.d/50-beenest.rules` (NetworkManager.settings.modify.system dla beenest).
+    * Nazwa urządzenia z DHCP: dnsmasq `dhcp-script=/usr/local/bin/beenest-dhcp` zapisuje nazwy do
+`/run/beenest-dhcp/<IP>`; `network_name()` zamienia myślniki na spacje („Pixel-9-Pro-Karol” → „Pixel 9 Pro Karol”,
+nawiasów z nazwy telefonu nie da się odtworzyć). Strona dostaje ją w `BEENEST_DEVICE.nazwa_sieciowa`.
+    * Ponowne parowanie pod tą samą nazwą (bez wielkości liter) zastępuje stary zapamiętany wpis.
+    * Pierwsze wejście urządzenia (`!device.known`): motyw z systemu (`systemLook()`: ciemny → nocna-czern,
+`prefers-contrast: more` → wysoki kontrast) i zapis od razu (zakłada sekcję `[urzadzenie <IP>]`).
+    * Szybki konfigurator (`openSetup()`, sekcja 12a `app.js`; `#setup` w `main.html`; `.setup*` w CSS):
+po sparowaniu (flaga `sessionStorage['beenest-konfigurator']`). Karta 1 = prawdziwy `#settings-appearance`
+przeniesiony na czas konfiguratora i oddany potem na miejsce; karta 2 = ptaszek w zaokrąglonym kwadracie.
+Przesuwanie kart: `.is-next` (100vw) / `.is-past` (-30vw), czas `--setup-duration` = 1,5 × `--anim-duration`.
+    * Wdrożone 21:13: hostname `beenest`, hasło hotspotu czytelne dla usługi, 302 z 10.42.0.1 na beenest.local,
+`/run/beenest-dhcp/10.42.0.238` = Pixel-9-Pro-Karol. PC użytkownika (Arch) nie rozwiązuje `.local`
+(brak avahi/nss-mdns) — to sprawa PC, nie Pi; z PC używaj adresu IP.
+    * Sprawdzone 21:40: Pixel 9 Pro i iPad Pro (przedstawia się jako „Macintosh”, bez nazwy w DHCP) parują się
+i działają na beenest.local, ciasteczko przeżywa restart serwera. `one_address()` loguje raz każde przekierowanie.
+    * **Otwarte, odłożone przez użytkownika:** Pixel 8 Pro („Pixel-8-Pro-Danka”) — Chrome: ERR_TOO_MANY_REDIRECTS
+także na http://10.42.0.1, w incognito i po wyczyszczeniu danych witryny. Do ula dochodzą z niego tylko systemowe
+testy łączności (generate_204 co kilkanaście sekund — Android nie waliduje sieci), żądań strony z Chrome brak
+(ani IPv4, ani IPv6). Dane komórkowe wyłączone, brak VPN, prywatny DNS „automatyczny”. Przyczyna nieznana.
+    * **Dane komórkowe przy połączeniu z ulem (21:45, próba opcji 1 – „uczciwy hotspot”):** w
+`/etc/NetworkManager/dnsmasq-shared.d/beenest.conf` na Pi ręcznie zakomentowane `address=/#/10.42.0.1`
+i dopisane `no-resolv` (w domu Pi ma internet z LAN-u, a tryb shared by go udostępnił – próba byłaby
+bez sensu). `pi/instaluj.sh` NIE ma tej zmiany: jego uruchomienie przywraca „fałszywy internet” (przywrócone 21:50).
+**Wynik próby:** panel działa, ale Android po „pozostań w sieci” robi z Wi-Fi ula sieć domyślną
+dla całego ruchu – danych komórkowych nie używa. Bez tej zgody domyślne są dane, a Chrome wysyła
+tamtędy także panel (nie działa). Android nie dzieli ruchu przeglądarki według celu (iOS tak).
+Wniosek: samym ustawieniem hotspotu się nie da. Rozważane dalej: opcja 2 = prawdziwe łącze w ulu (modem LTE na USB albo druga karta Wi-Fi) – shared
+udostępni je telefonom; opcja 3 = Pi jako klient hotspotu telefonu.
+    * Serwer można zrestartować bez sudo: `pkill -f BEENest/app.py` (systemd `Restart=always` go podnosi).
+    * Zgłoszonego błędu „trzeba podać inną nazwę, żeby sparować ponownie” nie odtworzyłem (dziennik na Pi
+nie jest trwały – tylko bieżące uruchomienie); w kodzie nie było sprawdzania unikalności nazw.
+* **Energooszczędność i kafelki (2026-11-20):**
+    * Karta Ustawienia na stronie głównej = 4 kafelki `.dash-card.quad` (2×2, na telefonie w rzędzie):
+Ustawienia (link), Parowanie (`#tile-pair`, `data-admin data-only="wyswietlacz"`, klika `#btn-pair`),
+Zasilanie (`#tile-power`: okno z Wyłącz / Uruchom ponownie – klikają `#btn-shutdown` / `#btn-reboot`, więc
+uprawnienia jak w Działaniu – oraz Uśpij ekran tylko na wyświetlaczu), Szybkie ustawienia (`#tile-quick`:
+jasność – tylko wyświetlacz, motyw jako 4 kafelki z próbką koloru, kontrast, Zamknij / Przejdź do ustawień).
+Wiersze siatki `minmax(0, 1fr)` – inaczej kafelki rozpychały stronę na 1024×600.
+    * Jasność: ustawienie urządzenia `brightness` ("20"…"100" co 10, domyślnie "100"), suwak w Wyglądzie
+(`data-only="wyswietlacz"`). Wyświetlacz HDMI (Waveshare, EDID „Lenovo”) nie ma `/sys/class/backlight`
+ani DDC → jasność programowo: czarna warstwa `#dim` (opacity = (100 − jasność) / 100).
+    * Uśpienie (sekcja 15 `app.js`): animacja `html.crt-off` (body → jasny pas → punkt), zasłona `#sleep`,
+serwer `POST /api/ekran/uspij|obudz` → `screen_power()` = `wlopm --off|--on '*'` (tylko na Raspberry, env
+`XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY=wayland-0`). Dotyk zasłony tylko budzi (nie klika pod spodem).
+Samo po `SLEEP_AFTER` = 10 min bez dotyku, nie gdy Klucz jest w porcie. Start serwera włącza obraz
+(teraz i po 30 s), bo strona po przeładowaniu nie pamięta uśpienia. Sprawdzone na Pi: HDMI-A-2 off/on.
+    * Blokada po błędnych PIN-ach na wyświetlaczu (`.lockout.is-display`): gradient #000 → #383838, bordowe
+akcenty (#9E1B32 ikona, #C8283F licznik), po `LOCKOUT_SHOW` = 10 s ekran gaśnie, dotyk budzi na kolejne 10 s.
+Telefony: wygląd blokady w swoim motywie, bez zmian.
+* Użytkownik ma wyświetlacz Pi obok siebie i widzi go na żywo — można go prosić o sprawdzenie ekranu.
+
 ## Uruchomienie
 
 ```

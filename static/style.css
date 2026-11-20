@@ -2793,6 +2793,136 @@ body[data-contrast="high"] .qr-dot {
   padding-top: 10px;
 }
 
+/* ---------- SZYBKI KONFIGURATOR (po sparowaniu telefonu) ----------
+   Karty jak przy konfiguracji iPhone'a: nowa wjeżdża od prawej, poprzednia odsuwa się w lewo i znika.
+   Czas: --setup-duration (1,5 × --anim-duration). */
+.setup {
+  --setup-duration: calc(var(--anim-duration) * 1.5);
+  position: fixed;
+  inset: 0;
+  z-index: 120;            /* nad stroną, pod listami rozwijanymi (150) i oknami (200) */
+  overflow: hidden;
+  background: var(--bg);
+  animation: setup-in var(--anim-duration) var(--anim-ease) both;
+}
+
+.setup.is-closing {
+  animation: setup-out var(--anim-duration) var(--anim-ease) both;
+}
+
+@keyframes setup-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes setup-out {
+  to {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+}
+
+.setup-card {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 640px);
+  margin: 0 auto;
+  padding: 28px 20px 20px;
+  background: var(--bg);
+  transition: transform var(--setup-duration) var(--anim-ease), opacity var(--setup-duration) var(--anim-ease);
+}
+
+.setup-card.is-next {
+  transform: translateX(100vw);
+}
+
+.setup-card.is-past {
+  transform: translateX(-30vw);
+  opacity: 0;
+}
+
+.setup-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.setup-card .logo {
+  margin-bottom: 18px;
+}
+
+.setup-card h1 {
+  font-size: clamp(28px, 6vw, 36px);
+  font-weight: 900;
+  letter-spacing: -.5px;
+  line-height: 1.15;
+  margin-bottom: 18px;
+}
+
+.setup-actions {
+  padding-top: 14px;
+}
+
+.setup-card .modal-btn {
+  flex: none;
+  width: 100%;
+  padding: 14px 18px;
+  font-size: 16px;
+}
+
+/* Karta „Wszystko skonfigurowane”: duża ikona jak na ekranie blokady */
+.setup-done {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+}
+
+.setup-done-icon svg {
+  width: min(34vh, 60vw);
+  height: min(34vh, 60vw);
+  fill: none;
+  stroke: var(--orange);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Ptaszek rysuje się, gdy karta wjedzie na ekran */
+.setup-check {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+
+.setup-done:not(.is-next) .setup-check {
+  animation: setup-check calc(var(--anim-duration) * 1.5) var(--anim-ease) var(--setup-duration) forwards;
+}
+
+@keyframes setup-check {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.setup-done h2 {
+  font-size: clamp(26px, 4vw, 38px);
+  font-weight: 900;
+  letter-spacing: -.5px;
+}
+
+.setup-done .lead {
+  max-width: 480px;
+  margin: 0;
+}
+
+.setup-done .modal-btn {
+  max-width: 360px;
+  margin-top: 10px;
+}
+
 @media (max-width: 850px) {
   .side-card {
     top: 8px;
@@ -2852,4 +2982,335 @@ body[data-contrast="high"] .qr-dot {
     padding-top: 7px;
     padding-bottom: 7px;
   }
+}
+
+/* ---------- KAFELKI „USTAWIENIA” NA STRONIE GŁÓWNEJ (2 × 2, na telefonie w rzędzie) ---------- */
+.dash-card.quad {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);   /* kafelki mieszczą się w karcie (1024×600 bez przewijania) */
+  gap: 10px;
+  min-height: 0;
+  padding: 10px;
+}
+
+/* sama karta stoi w miejscu – unoszą się kafelki */
+.dash-card.quad:hover {
+  transform: none;
+  border-color: var(--orange-dark);
+  box-shadow: var(--shadow);
+}
+
+.dash-card.quad::before {
+  display: none;
+}
+
+/* bez Parowania (komputer, telefon na szerokim ekranie) ostatni kafelek zajmuje cały dolny rząd */
+.dash-card.quad:has(#tile-pair[hidden]) #tile-quick {
+  grid-column: span 2;
+}
+
+.quad-tile {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px;
+  overflow: hidden;
+  border: none;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--orange) 9%, transparent);
+  color: var(--black);
+  font: 800 clamp(12px, 1.4vw, 15px)/1.15 var(--font);
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background .2s, transform .15s;
+}
+
+.quad-tile:hover {
+  background: color-mix(in srgb, var(--orange) 18%, transparent);
+}
+
+.quad-tile:active {
+  transform: scale(.96);
+}
+
+.quad-tile svg {
+  flex-shrink: 0;
+  width: clamp(24px, 3.2vw, 46px);
+  height: clamp(24px, 3.2vw, 46px);
+  fill: none;
+  stroke: var(--orange);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (max-width: 850px) {
+  .dash-card.quad {
+    grid-template-columns: none;
+    grid-template-rows: none;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+  }
+
+  .dash-card.quad:has(#tile-pair[hidden]) #tile-quick {
+    grid-column: auto;
+  }
+
+  .quad-tile {
+    aspect-ratio: 1;
+    font-size: 12px;
+  }
+}
+
+/* ---------- OKNO „ZASILANIE” ---------- */
+.modal-card.is-center {
+  align-items: center;
+  text-align: center;
+}
+
+.power-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.power-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 10px;
+  border: none;
+  border-radius: 20px;
+  background: var(--orange-soft);
+  color: var(--orange-dark);
+  font: 800 14px/1.2 var(--font);
+  cursor: pointer;
+  transition: filter .2s, transform .15s;
+}
+
+.power-option:hover {
+  filter: brightness(.95);
+}
+
+.power-option:active {
+  transform: scale(.97);
+}
+
+.power-option svg {
+  width: 40px;
+  height: 40px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.power-option.is-danger {
+  background: color-mix(in srgb, #D32F2F 14%, transparent);
+  color: #D32F2F;
+}
+
+/* ---------- OKNO „SZYBKIE USTAWIENIA” ---------- */
+.quick {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.quick-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quick-row:has(.toggle-switch) {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.theme-chips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.theme-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: var(--card-background);
+  color: var(--black);
+  font: 800 13px/1.2 var(--font);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .2s;
+}
+
+.theme-chip.active {
+  border-color: var(--orange);
+}
+
+.theme-swatch {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, .45);
+}
+
+/* ---------- SUWAK (jasność ekranu) ---------- */
+.range-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 220px;
+}
+
+.range {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--orange) 25%, var(--line));
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+  cursor: pointer;
+}
+
+.range::-webkit-slider-thumb {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 3px solid var(--card-background);
+  background: var(--orange);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.range::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 3px solid var(--card-background);
+  background: var(--orange);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+}
+
+.range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--orange) 35%, transparent);
+}
+
+.range-value {
+  min-width: 52px;
+  text-align: right;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- WYŚWIETLACZ PRZY ULU: przyciemnienie i uśpienie ---------- */
+/* Jasność = czarna warstwa nad wszystkim (nie łapie dotyku). */
+.dim {
+  position: fixed;
+  inset: 0;
+  z-index: 1900;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dim.is-fading {
+  transition: opacity .75s ease-in;
+}
+
+/* Zasłona uśpionego ekranu: łapie dotyk, który tylko budzi ekran */
+.sleep {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: #000;
+}
+
+.sleep.is-waking {
+  animation: sleep-wake .5s ease-out forwards;
+}
+
+@keyframes sleep-wake {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Gaszenie jak w starym telewizorze: obraz zsuwa się do jasnego poziomego pasa,
+   pas kurczy się do punktu na środku i znika. */
+html.crt-off {
+  background: #000;
+}
+
+html.crt-off body {
+  transform-origin: 50% 50vh;
+  pointer-events: none;
+  animation: crt-off .75s cubic-bezier(.55, 0, .45, 1) forwards;
+}
+
+@keyframes crt-off {
+  0% {
+    transform: scale(1, 1);
+    filter: brightness(1);
+  }
+
+  45% {
+    transform: scale(1, .006);
+    filter: brightness(3) contrast(3) saturate(0);
+  }
+
+  75% {
+    transform: scale(.08, .006);
+    filter: brightness(6) saturate(0);
+  }
+
+  100% {
+    transform: scale(0, 0);
+    filter: brightness(8) saturate(0);
+    opacity: 0;
+  }
+}
+
+/* ---------- BLOKADA NA WYŚWIETLACZU: czarna z bordowym akcentem w każdym motywie ---------- */
+.lockout.is-display {
+  background: linear-gradient(to bottom, #000000, #383838);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  color: #F4E9EB;
+}
+
+.lockout.is-display .lockout-icon svg {
+  stroke: #9E1B32;
+}
+
+.lockout.is-display .lockout-card h2 {
+  color: #FFFFFF;
+}
+
+.lockout.is-display .lockout-card p {
+  color: #B9A3A7;
+}
+
+.lockout.is-display .lockout-timer {
+  color: #C8283F;
 }

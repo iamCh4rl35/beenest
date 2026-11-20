@@ -22,8 +22,17 @@
     return 'Telefon';
   }
 
+  // Motyw z systemu urządzenia (tryb ciemny, zwiększony kontrast) – tylko przy pierwszym wejściu,
+  // potem obowiązuje to, co zapisano w global.conf.
+  function systemLook() {
+    const mq = q => window.matchMedia && window.matchMedia(q).matches;
+    return { theme: mq('(prefers-color-scheme: dark)') ? 'nocna-czern' : 'bialy-pylek',
+      highContrast: mq('(prefers-contrast: more)') };
+  }
+
   function showPairScreen() {
-    const s = (window.BEENEST_DEVICE || {}).settings || {};
+    const dev = window.BEENEST_DEVICE || {};
+    const s = dev.known ? (dev.settings || {}) : systemLook();
     document.body.setAttribute('data-theme', s.theme || 'bialy-pylek');
     document.body.setAttribute('data-contrast', s.highContrast ? 'high' : 'normal');
     document.querySelectorAll('header.topbar, .divider, main').forEach(el => { el.hidden = true; });
@@ -41,7 +50,7 @@
       $('pair-code-field').hidden = true;
       $('pair-lead').textContent = 'Kod z wyświetlacza jest już wczytany. Podaj nazwę tego urządzenia i naciśnij Sparuj.';
     }
-    $('pair-name').value = guessDeviceName();
+    $('pair-name').value = dev.nazwa_sieciowa || guessDeviceName();   // nazwa z DHCP hotspotu, np. „Pixel 9 Pro Karol”
 
     const fail = text => {
       $('pair-wait').hidden = true;
@@ -57,7 +66,11 @@
         try { st = await (await fetch('/api/parowanie/status', { cache: 'no-store' })).json(); } catch (e) { return; }
         if (st.stan === 'czeka') return;
         clearInterval(timer);
-        if (st.stan === 'przyjete') { location.replace(location.pathname); return; }
+        if (st.stan === 'przyjete') {
+          try { sessionStorage.setItem('beenest-konfigurator', '1'); } catch (e) { }   // po przeładowaniu: szybki konfigurator
+          location.replace(location.pathname);
+          return;
+        }
         useDigits();
         fail(st.stan === 'odrzucone' ? 'Wyświetlacz ula odrzucił to urządzenie.'
           : 'Minął czas na zatwierdzenie. Wygeneruj nowy kod na wyświetlaczu ula.');
@@ -106,7 +119,8 @@
     dataRetention: '12',
     feederRate: true,
     feederAlarm: true,
-    camera: 'external'
+    camera: 'external',
+    brightness: '100'          // % – tylko wyświetlacz przy ulu (sekcja 15)
   };
 
   // Wszystkie ustawienia są na Raspberry w data/global.conf: [zapis] wspólne dla wszystkich,
@@ -136,6 +150,10 @@
 
   const device = window.BEENEST_DEVICE || { settings: {}, known: true };
   const settings = Object.assign({}, defaultSettings, device.settings);
+  // Pierwsze wejście z tego urządzenia (brak sekcji w global.conf): motyw jak w systemie urządzenia.
+  // Zapis (13. INIT) zakłada sekcję, więc później obowiązuje już wybór z Ustawień.
+  const firstVisit = !device.known && !AUTH.wyswietlacz;
+  if (firstVisit) Object.assign(settings, systemLook());
 
   function applyTheme() {
     document.body.setAttribute('data-theme', settings.theme);
@@ -144,6 +162,7 @@
 
   function applySettingsToUI() {
     applyTheme();
+    applyBrightness(settings.brightness);
     Object.keys(SELECTS).forEach(id => { if ($(id)) $(id).value = settings[SELECTS[id]]; });
     syncDropdowns();
     Object.keys(TOGGLES).forEach(id => { if ($(id)) $(id).checked = settings[TOGGLES[id]]; });
@@ -217,8 +236,15 @@
   function onSettingChange(key, value) {
     settings[key] = value;
     if (key === 'theme' || key === 'highContrast') applyTheme();
+    if (key === 'brightness') applyBrightness(value);
     pushSettings({ [key]: value });
     render();
+  }
+
+  // Suwak jasności (Wygląd, tylko wyświetlacz): podgląd w trakcie przesuwania, zapis po puszczeniu
+  if ($('brightness-range')) {
+    $('brightness-range').addEventListener('input', e => applyBrightness(e.target.value));
+    $('brightness-range').addEventListener('change', e => onSettingChange('brightness', String(e.target.value)));
   }
 
   Object.keys(SELECTS).forEach(id => {
@@ -756,6 +782,7 @@
     $('modal-extra').replaceChildren(...(o.content ? [o.content] : []));   // content: własny element (kod QR, przełączniki)
     $('modal-extra').hidden = !o.content;
     $('modal-card').classList.toggle('is-wide', !!o.wide);
+    $('modal-card').classList.toggle('is-center', !!o.center);   // center: wyśrodkowany tytuł i treść
     $('modal-title').textContent = o.title || '';
     setModalText($('modal-text'), o.text || '');
     $('modal-text').hidden = !o.text;
@@ -1118,6 +1145,170 @@
     await noticeDialog({ icon: 'check', title: 'Dane usunięte', text: 'Zapisane dane atmosfery i samopoczucia zostały wymazane.' });
   });
 
+  /* ===== 12b. KAFELKI NA STRONIE GŁÓWNEJ: Parowanie, Zasilanie, Szybkie ustawienia ===== */
+  // Parowanie i Wyłącz / Uruchom ponownie wołają te same przyciski co zakładka Działanie,
+  // więc uprawnienia (PIN na wyświetlaczu, brak uprawnień na telefonie) sprawdzają się tak samo.
+  const ICON_MOON = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+  const THEMES = [
+    ['bialy-pylek', 'Biały Pyłek', '#FFFFFF', '#FF8A00'],
+    ['lekki-miodek', 'Lekki Miodek', '#FFF8E7', '#FF9E00'],
+    ['nocna-czern', 'Nocna Czerń', '#000000', '#FF8A00'],
+    ['miodna-szarosc', 'Miodna Szarość', '#1A1408', '#FFB800']
+  ];
+
+  $('tile-pair').addEventListener('click', () => $('btn-pair').click());
+
+  $('tile-power').addEventListener('click', async () => {
+    const box = document.createElement('div');
+    box.className = 'power-options';
+    [
+      { value: 'shutdown', label: 'Wyłącz', icon: MODAL_ICONS.power, danger: true },
+      { value: 'reboot', label: 'Uruchom ponownie', icon: MODAL_ICONS.update },
+      ...(sec.wyswietlacz ? [{ value: 'sleep', label: 'Uśpij ekran', icon: ICON_MOON }] : [])
+    ].forEach(o => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'power-option' + (o.danger ? ' is-danger' : '');
+      b.innerHTML = '<svg viewBox="0 0 24 24">' + o.icon + '</svg><span></span>';
+      b.querySelector('span').textContent = o.label;
+      b.addEventListener('click', () => modalAnswer(o.value));
+      box.appendChild(b);
+    });
+    const r = await askModal({ icon: false, center: true, title: 'Zasilanie', content: box, buttons: [{ label: 'Zamknij', value: 'cancel' }] });
+    modalClose();
+    if (r.value === 'sleep') setTimeout(sleepScreen, 300);          // po zamknięciu okna
+    else if (r.value === 'reboot') $('btn-reboot').click();
+    else if (r.value === 'shutdown') $('btn-shutdown').click();
+  });
+
+  function quickRow(label, control) {
+    const row = document.createElement('div');
+    row.className = 'quick-row';
+    const name = document.createElement('div');
+    name.className = 'setting-label';
+    name.textContent = label;
+    row.append(name, control);
+    return row;
+  }
+
+  $('tile-quick').addEventListener('click', async () => {
+    const box = document.createElement('div');
+    box.className = 'quick';
+    if (sec.wyswietlacz) {
+      const wrap = document.createElement('div');
+      wrap.className = 'range-box';
+      wrap.innerHTML = '<input type="range" class="range" min="20" max="100" step="10" aria-label="Jasność ekranu"><span class="range-value"></span>';
+      const range = wrap.querySelector('input'), out = wrap.querySelector('span');
+      const show = v => { out.textContent = v + ' %'; };
+      range.value = settings.brightness;
+      show(settings.brightness);
+      range.addEventListener('input', () => { show(range.value); applyBrightness(range.value); });
+      range.addEventListener('change', () => { onSettingChange('brightness', String(range.value)); applySettingsToUI(); });
+      box.appendChild(quickRow('Jasność ekranu', wrap));
+    }
+    const themes = document.createElement('div');
+    themes.className = 'theme-chips';
+    const paintThemes = () => themes.querySelectorAll('.theme-chip').forEach(c => c.classList.toggle('active', c.dataset.value === settings.theme));
+    THEMES.forEach(([value, label, bg, accent]) => {
+      const c = document.createElement('button');
+      c.type = 'button';
+      c.className = 'theme-chip';
+      c.dataset.value = value;
+      c.innerHTML = '<span class="theme-swatch"></span><span></span>';
+      c.firstChild.style.background = 'linear-gradient(135deg, ' + bg + ' 50%, ' + accent + ' 50%)';
+      c.lastChild.textContent = label;
+      c.addEventListener('click', () => { onSettingChange('theme', value); applySettingsToUI(); paintThemes(); });
+      themes.appendChild(c);
+    });
+    paintThemes();
+    box.appendChild(quickRow('Motyw', themes));
+    const toggle = document.createElement('label');
+    toggle.className = 'toggle-switch';
+    toggle.innerHTML = '<input type="checkbox" aria-label="Wysoki kontrast"><span class="slider"></span>';
+    toggle.firstChild.checked = !!settings.highContrast;
+    toggle.firstChild.addEventListener('change', e => { onSettingChange('highContrast', e.target.checked); applySettingsToUI(); });
+    box.appendChild(quickRow('Wysoki kontrast', toggle));
+    const r = await askModal({
+      icon: false, title: 'Szybkie ustawienia', content: box,
+      buttons: [{ label: 'Zamknij', value: 'cancel' }, { label: 'Przejdź do ustawień', value: 'settings', kind: 'primary' }]
+    });
+    modalClose();
+    if (r.value === 'settings') location.hash = '#ustawienia';
+  });
+
+  /* ===== 15. EKRAN PRZY ULU: jasność i uśpienie (animacja jak gaszenie starego telewizora) ===== */
+  // Jasność: czarna warstwa #dim (wyświetlacz na HDMI nie ma sterowania podświetleniem).
+  // Uśpienie: animacja .crt-off na stronie (style.css), potem czarna zasłona #sleep, a serwer gasi
+  // obraz (wlopm). Dotyk zasłony budzi ekran. Usypia się samo po SLEEP_AFTER bez dotyku (nie, gdy
+  // Klucz jest w porcie), a przy blokadzie po błędnych PIN-ach – po LOCKOUT_SHOW pokazywania blokady.
+  const SLEEP_AFTER = 10 * 60 * 1000, LOCKOUT_SHOW = 10 * 1000, CRT_TIME = 750;
+  const nap = { asleep: false, busy: false, lastActivity: Date.now(), lockoutTimer: null };
+
+  function applyBrightness(value) {
+    const b = Math.min(100, Math.max(20, Number(value) || 100));
+    $('dim').style.opacity = AUTH.wyswietlacz ? String((100 - b) / 100) : '0';
+    if ($('brightness-range')) {
+      $('brightness-range').value = b;
+      $('brightness-value').textContent = b + ' %';
+    }
+  }
+
+  async function sleepScreen() {
+    if (!AUTH.wyswietlacz || nap.asleep || nap.busy) return;
+    nap.busy = true;
+    clearTimeout(nap.lockoutTimer);
+    closeDropdown();
+    const dim = $('dim');
+    dim.classList.add('is-fading');                       // LCD świeci czernią – ściemniamy w trakcie animacji
+    dim.style.opacity = String(Math.max(Number(dim.style.opacity) || 0, .6));
+    document.documentElement.classList.add('crt-off');
+    await new Promise(r => setTimeout(r, CRT_TIME));
+    $('sleep').hidden = false;
+    document.documentElement.classList.remove('crt-off');
+    dim.classList.remove('is-fading');
+    applyBrightness(settings.brightness);
+    nap.asleep = true;
+    nap.busy = false;
+    postJSON('/api/ekran/uspij').catch(() => { });
+  }
+
+  function wakeScreen() {
+    if (!nap.asleep) return;
+    nap.asleep = false;
+    nap.lastActivity = Date.now();
+    postJSON('/api/ekran/obudz').catch(() => { });
+    const curtain = $('sleep');
+    curtain.classList.add('is-waking');
+    setTimeout(() => { curtain.hidden = true; curtain.classList.remove('is-waking'); }, 500);
+    if ((sec.blokada || 0) > 0) scheduleLockoutSleep();  // przy blokadzie: znów 10 s i gaśnie
+  }
+
+  // Blokada po błędnych PIN-ach na wyświetlaczu: widać ją przez LOCKOUT_SHOW, potem ekran gaśnie
+  function scheduleLockoutSleep() {
+    clearTimeout(nap.lockoutTimer);
+    nap.lockoutTimer = setTimeout(() => { if ((sec.blokada || 0) > 0) sleepScreen(); }, LOCKOUT_SHOW);
+  }
+
+  // Dotyk uśpionego ekranu tylko go budzi – nie klika w to, co pod spodem
+  $('sleep').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); wakeScreen(); });
+  $('sleep').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); });
+  document.addEventListener('keydown', e => {
+    if (!nap.asleep) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    wakeScreen();
+  }, true);
+  ['pointerdown', 'keydown', 'wheel'].forEach(ev => document.addEventListener(ev, () => {
+    nap.lastActivity = Date.now();
+    if ((sec.blokada || 0) > 0 && !nap.asleep && sec.wyswietlacz) scheduleLockoutSleep();
+  }, { capture: true, passive: true }));
+  if (AUTH.wyswietlacz) {
+    setInterval(() => {
+      const keyIn = sec.klucz && sec.klucz.wpiety;
+      if (!nap.asleep && !keyIn && Date.now() - nap.lastActivity > SLEEP_AFTER) sleepScreen();
+    }, 5000);
+  }
+
   /* ===== 14. ZABEZPIECZENIA ===== */
   // Opis całości: app.py, sekcja "Zabezpieczenia". Tu: przycisk z kłódką, PIN (numpad), blokada,
   // uprawnienia przycisków, parowanie, lista urządzeń, Klucz, zmiana PIN-u.
@@ -1335,10 +1526,12 @@
 
   function renderLockout() {
     const left = sec.blokada || 0, box = $('lockout');
+    box.classList.toggle('is-display', !!sec.wyswietlacz);   // wyświetlacz: czarny z bordowym akcentem w każdym motywie
     if (left <= 0) {
       box.hidden = true;
       lockoutEnd = 0;
       cancelAnimationFrame(lockoutFrame);
+      clearTimeout(nap.lockoutTimer);
       return;
     }
     const end = performance.now() + left * 1000;
@@ -1353,6 +1546,7 @@
       box.hidden = false;
       if (pinState.resolve) pinClose(null);
       lockoutTick();
+      if (sec.wyswietlacz) scheduleLockoutSleep();        // po 10 s ekran gaśnie; dotyk budzi na kolejne 10 s
     }
   }
 
@@ -1722,9 +1916,52 @@
 
   setInterval(refreshSecurity, AUTH.wyswietlacz ? 1000 : 2000);
 
+  /* ===== 12a. SZYBKI KONFIGURATOR po sparowaniu (karty przesuwane jak przy konfiguracji iPhone'a) ===== */
+  // Karta 1 to prawdziwa zakładka Wygląd, przeniesiona na chwilę z Ustawień (te same pola i ten sam zapis),
+  // karta 2 potwierdza. Wygląd przesuwania: style.css -> .setup-card.
+  function openSetup() {
+    const setup = $('setup'), panel = $('settings-appearance');
+    const home = panel.parentNode, after = panel.nextSibling, wasActive = panel.classList.contains('active');
+    $('setup-appearance').appendChild(panel);
+    panel.classList.add('active');
+    $('setup-done-text').textContent = 'Twoje ustawienia wyglądu zostały zapisane na urządzeniu i możesz już '
+      + (AUTH.poziom === 'admin' ? 'swobodnie zarządzać swoją pasieką.' : 'obserwować dane i informacje o pasiece.');
+    const cards = [...setup.querySelectorAll('.setup-card')];
+    const show = i => cards.forEach((card, n) => {
+      card.classList.toggle('is-past', n < i);
+      card.classList.toggle('is-next', n > i);
+      card.inert = n !== i;
+    });
+    show(0);
+    setup.hidden = false;
+    $('setup-next').onclick = () => {
+      closeDropdown();
+      show(1);
+      $('setup-finish').focus({ preventScroll: true });
+    };
+    $('setup-finish').onclick = () => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        setup.hidden = true;
+        setup.classList.remove('is-closing');
+        home.insertBefore(panel, after);          // zakładka Wygląd wraca do Ustawień
+        panel.classList.toggle('active', wasActive);
+      };
+      setup.addEventListener('animationend', e => { if (e.target === setup) finish(); });
+      setTimeout(finish, 1500);                   // gdyby animacja się nie odpaliła
+      setup.classList.add('is-closing');
+    };
+  }
+
   /* ===== 13. INIT ===== */
   applySecurity(AUTH);
   applySettingsToUI();
   applyCamera(settings.camera);     // rysuje stronę i od razu odpytuje serwer
+  if (firstVisit) pushSettings({ theme: settings.theme, highContrast: settings.highContrast });
   migrateBrowserSettings();
+  let setupWanted = false;
+  try { setupWanted = sessionStorage.getItem('beenest-konfigurator') === '1'; sessionStorage.removeItem('beenest-konfigurator'); } catch (e) { }
+  if (setupWanted && !AUTH.wyswietlacz) openSetup();
 })();
