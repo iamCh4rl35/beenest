@@ -19,6 +19,8 @@ Traktuj każdy punkt jako wymaganie i sprawdź na końcu, że wszystkie są spe�
 * Testuje na PC (Windows / Arch Linux) bez czujników — wtedy importy `smbus2` / `bme280`
 w sterownikach bywają zakomentowane. Nie odkomentowuj ich bez pytania.
 * Repozytorium: https://github.com/iamCh4rl35/beenest
+* **Commity: bez dopisku `Co-Authored-By: Claude…` ani innego podpisu Claude** – użytkownik nie chce Claude
+w „Contributors” na GitHubie (2026-11-20). Autor i push jako użytkownik (`iamCh4rl35`, git config na PC).
 
 ## Miejsca operacji
 
@@ -33,6 +35,9 @@ Na Pi jest też `~/bme-env` (prawdopodobnie środowisko Pythona do BME280).
 * Powłoka użytkownika na Pi to **fish** — dłuższe polecenia przez `ssh ... bash -s <<'EOF' ... EOF`.
 * **sudo na Pi wymaga hasła** — Claude nie robi zmian systemowych sam; daje użytkownikowi komendę
 `ssh -t beenest@192.168.1.219 sudo bash BEENest/pi/instaluj.sh` do uruchomienia w terminalu.
+* Commit 6efef22 (2026-11-20) wypchnięty na GitHub; repozytorium na Pi wyrównane do niego (`git merge --ff-only`),
+na Pi `core.fileMode=false`. Skrypty w `pi/` są w gicie jako 644 – `kiosk.sh` musi mieć +x (lwrespawn uruchamia
+go wprost); `instaluj.sh` robi `chmod +x`, ale `git pull` zmieniający ten plik może zdjąć +x.
 * Synchronizacja PC → Pi: `scp` zmienionych plików (Pi ma też repozytorium git; przed `git pull` na Pi
 może być potrzebne `git checkout -- <plik>`). Sprawdzanie zgodności: `md5sum`.
 * LAN (eth0) to połączenie do zarządzania. Użytkownik wyłączał Wi-Fi, bo połączenie klienckie
@@ -134,9 +139,13 @@ Zasilanie (`#tile-power`: okno z Wyłącz / Uruchom ponownie – klikają `#btn-
 uprawnienia jak w Działaniu – oraz Uśpij ekran tylko na wyświetlaczu), Szybkie ustawienia (`#tile-quick`:
 jasność – tylko wyświetlacz, motyw jako 4 kafelki z próbką koloru, kontrast, Zamknij / Przejdź do ustawień).
 Wiersze siatki `minmax(0, 1fr)` – inaczej kafelki rozpychały stronę na 1024×600.
-    * Jasność: ustawienie urządzenia `brightness` ("20"…"100" co 10, domyślnie "100"), suwak w Wyglądzie
+    * Jasność: ustawienie urządzenia `brightness` ("1"…"100", domyślnie "100"), suwak w Wyglądzie
 (`data-only="wyswietlacz"`). Wyświetlacz HDMI (Waveshare, EDID „Lenovo”) nie ma `/sys/class/backlight`
-ani DDC → jasność programowo: czarna warstwa `#dim` (opacity = (100 − jasność) / 100).
+ani DDC → jasność programowo: czarna warstwa `#dim`. **1 % na suwaku = 60 % prawdziwej jasności**
+(`DIM_FLOOR`; poniżej 60 % panel ma błędy obrazu – zgłoszenie użytkownika), 100 % = 100 %.
+Animacja usypiania może ściemniać głębiej (do 0,6 krycia warstwy).
+    * Animacja usypiania przyspieszona 2× na życzenie użytkownika: 375 ms (`CRT_TIME` w app.js = `.crt-off` w CSS).
+Budzenie dotykiem przy wyłączonym HDMI potwierdzone przez użytkownika na wyświetlaczu.
     * Uśpienie (sekcja 15 `app.js`): animacja `html.crt-off` (body → jasny pas → punkt), zasłona `#sleep`,
 serwer `POST /api/ekran/uspij|obudz` → `screen_power()` = `wlopm --off|--on '*'` (tylko na Raspberry, env
 `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY=wayland-0`). Dotyk zasłony tylko budzi (nie klika pod spodem).

@@ -1197,7 +1197,7 @@
     if (sec.wyswietlacz) {
       const wrap = document.createElement('div');
       wrap.className = 'range-box';
-      wrap.innerHTML = '<input type="range" class="range" min="20" max="100" step="10" aria-label="Jasność ekranu"><span class="range-value"></span>';
+      wrap.innerHTML = '<input type="range" class="range" min="1" max="100" step="1" aria-label="Jasność ekranu"><span class="range-value"></span>';
       const range = wrap.querySelector('input'), out = wrap.querySelector('span');
       const show = v => { out.textContent = v + ' %'; };
       range.value = settings.brightness;
@@ -1241,12 +1241,14 @@
   // Uśpienie: animacja .crt-off na stronie (style.css), potem czarna zasłona #sleep, a serwer gasi
   // obraz (wlopm). Dotyk zasłony budzi ekran. Usypia się samo po SLEEP_AFTER bez dotyku (nie, gdy
   // Klucz jest w porcie), a przy blokadzie po błędnych PIN-ach – po LOCKOUT_SHOW pokazywania blokady.
-  const SLEEP_AFTER = 10 * 60 * 1000, LOCKOUT_SHOW = 10 * 1000, CRT_TIME = 750;
+  const SLEEP_AFTER = 10 * 60 * 1000, LOCKOUT_SHOW = 10 * 1000, CRT_TIME = 375;   // CRT_TIME = .crt-off w style.css
+  const DIM_FLOOR = 60;      // % prawdziwej jasności przy 1 % na suwaku (ciemniej panel ma błędy obrazu)
   const nap = { asleep: false, busy: false, lastActivity: Date.now(), lockoutTimer: null };
 
   function applyBrightness(value) {
-    const b = Math.min(100, Math.max(20, Number(value) || 100));
-    $('dim').style.opacity = AUTH.wyswietlacz ? String((100 - b) / 100) : '0';
+    const b = Math.min(100, Math.max(1, Number(value) || 100));       // to, co widać na suwaku
+    const real = DIM_FLOOR + (b - 1) * (100 - DIM_FLOOR) / 99;          // 1 → 60 %, 100 → 100 %
+    $('dim').style.opacity = AUTH.wyswietlacz ? String((100 - real) / 100) : '0';
     if ($('brightness-range')) {
       $('brightness-range').value = b;
       $('brightness-value').textContent = b + ' %';

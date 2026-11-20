@@ -136,7 +136,8 @@ DEVICE_SETTINGS = {
     "feederData":        ("poziom", {"poziom", "ostatnie"}),
     "feederAlarm":       (True, None),
     "camera":            ("external", {"external", "internal"}),
-    "brightness":        ("100", {str(v) for v in range(20, 101, 10)}),   # % – tylko wyświetlacz przy ulu
+    # % na suwaku (1–100) – tylko wyświetlacz przy ulu; 1 % = 60 % prawdziwej jasności (niżej panel ma błędy obrazu)
+    "brightness":        ("100", {str(v) for v in range(1, 101)}),
 }
 # Ustawienia urządzenia z zakładki Działanie – jak cała ta zakładka zmienia je tylko administrator
 ADMIN_DEVICE_SETTINGS = {"feederAlarm"}

@@ -3235,7 +3235,7 @@ body[data-contrast="high"] .qr-dot {
 }
 
 .dim.is-fading {
-  transition: opacity .75s ease-in;
+  transition: opacity .375s ease-in;
 }
 
 /* Zasłona uśpionego ekranu: łapie dotyk, który tylko budzi ekran */
@@ -3265,7 +3265,7 @@ html.crt-off {
 html.crt-off body {
   transform-origin: 50% 50vh;
   pointer-events: none;
-  animation: crt-off .75s cubic-bezier(.55, 0, .45, 1) forwards;
+  animation: crt-off .375s cubic-bezier(.55, 0, .45, 1) forwards;
 }
 
 @keyframes crt-off {
