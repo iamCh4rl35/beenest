@@ -175,6 +175,21 @@ decyzja gdziekolwiek zamyka okno wszędzie (`prosba` znika, `rozpatrzona` = {id,
 Wyświetlacz bez uprawnień: decyzja prosi o PIN. Zamknięcie tłem/Escape = tylko na tym urządzeniu.
     * Kiosk: autostart `lwrespawn /bin/sh pi/kiosk.sh` (niezależnie od prawa wykonywania); skrypty w gicie 100755.
 Zmiana autostartu wymaga ponownego `sudo bash pi/instaluj.sh --blokada`.
+* **Kolory wyświetlacza Waveshare 7" (2026-11-20):**
+    * Plansza testowa (szarości 0–80 i 160–255): ciemne zlewają się z czernią do ~40 (48 wyraźne), jasne od 232
+w górę zlewają się w biel → niezgodny zakres HDMI: Pi przy 1024×600 wysyła pełny 0–255 („Broadcast RGB” =
+Automatic), panel oczekuje 16–235. Zrzut `grim` pokazuje kolory poprawnie (problem jest za kartą graficzną).
+    * `pi/hdmi_zakres.py` (ioctl DRM, tylko biblioteka standardowa): pokazuje / ustawia „Broadcast RGB”
+(`ograniczony | pelny | auto`). Działa tylko bez kompozytora → woła go `/usr/local/bin/beenest-kiosk`
+przed `exec labwc` (`HDMI_RANGE=ograniczony` na górze `instaluj.sh`, wynik w dzienniku: `journalctl -t beenest-hdmi`).
+    * Dodatkowo CSS tylko dla wyświetlacza (`body[data-urzadzenie="wyswietlacz"]`) w ciemnych motywach:
+rozjaśnione `--card-background`, `--line`, `--orange-soft`, `--dock-bg` (Nocna Czerń #38312F / #554B48 /
+#5C3A00; Miodna Szarość #463820 / #66542F / #5E4818, tło #2E2410). Użytkownik ocenił nowe tła „spoko”.
+Neutralne szarości (#333333) panel pokazuje zielonkawo → karta lekko ciepła #38312F (wybór z planszy, wariant 4).
+**Korekta ma działać wyłącznie na wyświetlaczu – telefony i komputery mają oryginalne kolory** (wymóg).
+    * Po włączeniu zakresu ograniczonego (wdrożone 23:03): ciemne widać od 32 (ledwo) / 40 (wyraźnie), jasne
+prawie w pełnej skali (3 ostatnie trudno odróżnić) – lepiej o jeden stopień, zakres zostaje „ograniczony”.
+Plansza testowa: tylko tymczasowo w `static/test-kolorow.html` na Pi (usunięta, nie w repozytorium).
 * Użytkownik ma wyświetlacz Pi obok siebie i widzi go na żywo — można go prosić o sprawdzenie ekranu.
 
 ## Uruchomienie

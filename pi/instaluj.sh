@@ -25,6 +25,9 @@ LIGHTDM=/etc/lightdm/lightdm.conf
 KIOSK_CONF=/etc/beenest/labwc   # konfiguracja labwc sesji kiosku (root – użytkownik jej nie zmieni)
 USER_LABWC="$HOME_DIR/.config/labwc"
 CURSOR_THEME=beenest-bez-kursora   # /usr/share/icons/<nazwa>: same przezroczyste kursory
+# Zakres kolorów HDMI (pi/hdmi_zakres.py): ograniczony = 16–235 (Waveshare 7" ucina oba końce pełnego
+# zakresu), pelny = 0–255, auto = jak sterownik. Inny monitor: zmień i uruchom skrypt ponownie.
+HDMI_RANGE=ograniczony
 MODE=${1:-}
 
 say() { echo; echo "== $*"; }
@@ -233,6 +236,8 @@ if raspi-config nonint is_pi; then
     export WLR_DRM_FORCE_LIBLIFTOFF=1
     raspi-config nonint gpu_has_mmu || export WLR_RENDERER=pixman
 fi
+# Zakres kolorów HDMI – da się go zmienić tylko teraz, zanim labwc przejmie ekran (wynik w dzienniku)
+python3 $PI_DIR/hdmi_zakres.py $HDMI_RANGE 2>&1 | logger -t beenest-hdmi
 exec /usr/bin/labwc -C $KIOSK_CONF
 EOF
 chmod 755 /usr/local/bin/beenest-kiosk

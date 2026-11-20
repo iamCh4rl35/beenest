@@ -3403,3 +3403,41 @@ body[data-urzadzenie="telefon"] .quad-tile:hover {
   background: var(--card-background);
   box-shadow: var(--hover-glow), 0 0 0 3px var(--hover-ring);
 }
+
+/* ---------- WYŚWIETLACZ PRZY ULU (Waveshare 7"): ciemne tony ----------
+   Panel pokazuje jako czerń wszystko poniżej poziomu ~40–48 (plansza testowa 2026-11-20; jasne odcienie
+   w pełnej skali – to nie zakres HDMI, tylko słaba wierność ciemnych tonów panelu). W ciemnych motywach
+   ciemne tła (przyciski, karty, linie) są więc rozjaśnione tak, żeby kanały były powyżej progu – na tym
+   panelu wyglądają jak oryginalne kolory na dobrym ekranie. Telefony i komputery mają kolory bez zmian. */
+/* Szarości lekko ciepłe: neutralne #333333 panel pokazuje zielonkawo (wybór użytkownika z planszy: #38312F) */
+body[data-urzadzenie="wyswietlacz"][data-theme="nocna-czern"] {
+  --card-background: #38312F;
+  --line: #554B48;
+  --orange-soft: #5C3A00;
+  --dock-bg: rgba(56, 49, 47, 0.75);
+}
+
+body[data-urzadzenie="wyswietlacz"][data-theme="miodna-szarosc"] {
+  --card-background: #463820;
+  --line: #66542F;
+  --orange-soft: #5E4818;
+  --dock-bg: rgba(70, 56, 32, 0.8);
+}
+
+body[data-urzadzenie="wyswietlacz"][data-theme="miodna-szarosc"]:not([data-contrast="high"]) {
+  --bg: #2E2410;
+}
+
+body[data-urzadzenie="wyswietlacz"][data-contrast="high"][data-theme="nocna-czern"] {
+  --orange-soft: #555555;
+}
+
+body[data-urzadzenie="wyswietlacz"][data-contrast="high"][data-theme="miodna-szarosc"] {
+  --line: #6A6A6A;
+}
+
+/* Kafelki „Ustawienia”: 9 % pomarańczu na ciemnej karcie znika w czerni – pełne tło przycisku */
+body[data-urzadzenie="wyswietlacz"][data-theme="nocna-czern"] .quad-tile,
+body[data-urzadzenie="wyswietlacz"][data-theme="miodna-szarosc"] .quad-tile {
+  background: var(--orange-soft);
+}
