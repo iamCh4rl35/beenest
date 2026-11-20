@@ -206,7 +206,10 @@ app.secret_key = _secret_key()
 app.config.update(
     SESSION_COOKIE_NAME="beenest",
     SESSION_COOKIE_HTTPONLY=True,           # skrypt na stronie nie odczyta ciasteczka
-    SESSION_COOKIE_SAMESITE="Strict",       # cudza strona nie wyśle żądania z naszym ciasteczkiem
+    # Lax, nie Strict: przy Strict przeglądarka nie wysyła ciasteczka, gdy wejście zaczyna się gdzie indziej
+    # (przekierowanie 10.42.0.1 → beenest.local, kod QR, inna aplikacja) – Chrome na Androidzie pokazywał wtedy
+    # parowanie zapamiętanemu telefonowi. Przed cudzymi stronami chroni to, że każda zmiana to POST z JSON-em.
+    SESSION_COOKIE_SAMESITE="Lax",
     PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=REMEMBER_DAYS),
 )
 

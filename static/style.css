@@ -3015,11 +3015,6 @@ body[data-contrast="high"] .qr-dot {
   display: none;
 }
 
-/* bez Parowania (komputer, telefon na szerokim ekranie) ostatni kafelek zajmuje cały dolny rząd */
-.dash-card.quad:has(#tile-pair[hidden]) #tile-quick {
-  grid-column: span 2;
-}
-
 .quad-tile {
   min-width: 0;
   min-height: 0;
@@ -3066,10 +3061,6 @@ body[data-contrast="high"] .qr-dot {
     grid-template-rows: none;
     grid-auto-flow: column;
     grid-auto-columns: 1fr;
-  }
-
-  .dash-card.quad:has(#tile-pair[hidden]) #tile-quick {
-    grid-column: auto;
   }
 
   .quad-tile {
@@ -3384,6 +3375,11 @@ body[data-urzadzenie="telefon"] .dash-card.quad {
   border: none;
   background: none;
   box-shadow: none;
+}
+
+/* Parowanie obok Estetyki (na wyświetlaczu zostaje w siatce 2 × 2 na swoim miejscu) */
+body[data-urzadzenie="telefon"] #tile-pair {
+  order: 4;
 }
 
 body[data-urzadzenie="telefon"] .quad-tile {

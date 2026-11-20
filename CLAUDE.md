@@ -166,7 +166,16 @@ internetu, więc żadnych Google Fonts. Domyślna grubość `body` = 700 („dom
     * Wygląd: grupa „Kolorystyka” → „Estetyka” z jednym wierszem i okrągłą strzałką (`#btn-aesthetics`)
 otwierającą ten sam panel bez linku. Motyw / kontrast / jasność są już tylko w panelu (zwolnione miejsce).
     * Telefon (`body[data-urzadzenie="telefon"]`): kafelki jako osobne karty (Ustawienia, Zasilanie, Estetyka).
-Zasilanie na telefonie: Wyłącz, Uruchom ponownie, Zgaś ekran ula, Sparuj urządzenie (2×2).
+Telefon: 4 karty – Ustawienia, Zasilanie, Estetyka, **Parowanie** (kafelek `#tile-pair` widoczny wszędzie,
+na telefonie `order: 4` = obok Estetyki; `data-admin` – telefon bez uprawnień dostaje okno o braku uprawnień).
+Parowanie ma być kartą obok Estetyki, NIE opcją w Zasilaniu (poprawka użytkownika).
+Zasilanie: Wyłącz, Uruchom ponownie, Uśpij ekran / Zgaś ekran ula, oraz usuwanie z pamięci ula:
+telefon „Usuń z pamięci ula” = `#btn-leave` (odłącza sam siebie), wyświetlacz „Usuń urządzenie z pamięci ula”
+= `#btn-devices` (lista zapamiętanych, opcja administratora).
+    * Ciasteczko urządzenia (`beenest`, sesja Flaska z id urządzenia, rok ważności, odnawiane przy każdym wejściu):
+**`SameSite=Lax`, nie Strict** – przy Strict Chrome na Androidzie nie wysyłał go przy wejściu przez przekierowanie
+10.42.0.1 → beenest.local, z kodu QR albo z innej aplikacji i zapamiętany Pixel widział ekran parowania
+(Safari na iPadzie był łagodniejszy). Ochrona przed cudzymi stronami: wszystkie zmiany to POST z JSON-em.
     * Zgaś ekran ula z telefonu: `POST /api/ekran/uspij` od telefonu zwiększa `_screen["zadanie"]`, wyświetlacz
 widzi zmianę `uspij` w stanie i sam robi animację + wlopm.
     * Parowanie: kod, Wi-Fi i decyzję może obsłużyć **każde urządzenie administratora** (`need()` zamiast

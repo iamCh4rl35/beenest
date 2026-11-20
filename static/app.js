@@ -1149,7 +1149,6 @@
   // Parowanie i Wyłącz / Uruchom ponownie wołają te same przyciski co zakładka Działanie,
   // więc uprawnienia (PIN na wyświetlaczu, brak uprawnień na telefonie) sprawdzają się tak samo.
   const ICON_MOON = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
-  const ICON_QR = '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20 14v.01M20 17v4h-3M14 20v1"/>';
   const THEMES = [
     ['bialy-pylek', 'Biały Pyłek', '#FFFFFF', '#FF8A00'],
     ['lekki-miodek', 'Lekki Miodek', '#FFF8E7', '#FF9E00'],
@@ -1159,8 +1158,8 @@
 
   $('tile-pair').addEventListener('click', () => $('btn-pair').click());
 
-  // Zasilanie. Telefon: zamiast „Uśpij ekran” – „Zgaś ekran ula” (wyświetlacz robi animację sam) oraz
-  // „Sparuj urządzenie” (tylko administrator; kod i zatwierdzenie na tym telefonie).
+  // Zasilanie. Telefon: zamiast „Uśpij ekran” – „Zgaś ekran ula” (wyświetlacz robi animację sam).
+  // „Usuń z pamięci ula”: telefon usuwa sam siebie (jak „Odłącz od ula”), wyświetlacz otwiera listę urządzeń.
   $('tile-power').addEventListener('click', async () => {
     const box = document.createElement('div');
     box.className = 'power-options';
@@ -1169,7 +1168,8 @@
       { value: 'reboot', label: 'Uruchom ponownie', icon: MODAL_ICONS.update },
       sec.wyswietlacz ? { value: 'sleep', label: 'Uśpij ekran', icon: ICON_MOON }
         : { value: 'sleep-remote', label: 'Zgaś ekran ula', icon: ICON_MOON },
-      ...(sec.wyswietlacz ? [] : [{ value: 'pair', label: 'Sparuj urządzenie', icon: ICON_QR }])
+      sec.wyswietlacz ? { value: 'devices', label: 'Usuń urządzenie z pamięci ula', icon: MODAL_ICONS.trash }
+        : { value: 'leave', label: 'Usuń z pamięci ula', icon: MODAL_ICONS.trash }
     ].forEach(o => {
       const b = document.createElement('button');
       b.type = 'button';
@@ -1187,16 +1187,9 @@
     else if (r.value === 'sleep-remote') {
       try { await postJSON('/api/ekran/uspij'); showPopup('Ekran ula zgaśnie za chwilę. Dotyk ekranu go obudzi.', 5000, false); }
       catch (e) { showPopup('Nie udało się zgasić ekranu ula: ' + e.message, 6000, false); }
-    } else if (r.value === 'pair') {
-      if (!isAdmin() && !sec.bez_zabezpieczen) {
-        noticeDialog({
-          icon: 'lock', title: 'Brak uprawnień',
-          text: 'Parowanie nowych urządzeń wymaga telefonu z uprawnieniami administratora.\nUprawnienia nadaje administrator: Ustawienia → Działanie → Urządzenia.'
-        });
-        return;
-      }
-      try { await pairStart(); } catch (e) { showPopup('Nie udało się: ' + e.message, 8000, false); }
     }
+    else if (r.value === 'leave') $('btn-leave').click();          // potwierdzenie i odłączenie jak w Działaniu
+    else if (r.value === 'devices') $('btn-devices').click();      // lista urządzeń (opcja administratora)
   });
 
   function quickRow(label, control) {
