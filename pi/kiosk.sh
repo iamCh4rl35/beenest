@@ -19,9 +19,9 @@ until curl -s -o /dev/null http://127.0.0.1/; do sleep 1; done
 # Puste okno Chromium (zanim narysuje stronę) ma kolor z motywu GTK – domyślnie biały, co w ciemności
 # dawało „błysk” po logo. Motyw GTK dobieramy do motywu wyświetlacza z data/global.conf.
 CONF="$(dirname "$0")/../data/global.conf"
-THEME=$(sed -n '/^\[urzadzenie 127\.0\.0\.1\]/,/^\[/s/^theme *= *//p' "$CONF" 2>/dev/null)
+THEME=$(sed -n '/^\[device 127\.0\.0\.1\]/,/^\[/s/^theme *= *//p' "$CONF" 2>/dev/null)
 case "$THEME" in
-  nocna-czern|miodna-szarosc) export GTK_THEME=Adwaita:dark ;;
+  night-black|honey-grey) export GTK_THEME=Adwaita:dark ;;
   *) export GTK_THEME=Adwaita ;;
 esac
 

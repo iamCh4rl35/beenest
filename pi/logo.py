@@ -2,9 +2,9 @@
 Logo startowe w kolorach motywu wyświetlacza (tylko biblioteka standardowa).
 
     python3 pi/logo.py <źródło.png> <wynik.png> <tło> <kolor „BEE”> <kolor „NEST”>
-    python3 pi/logo.py pi/logo-startowe.png /tmp/logo.png '#FFFFFF' '#0F0F10' '#FF8A00'
+    python3 pi/logo.py pi/boot-logo.png /tmp/logo.png '#FFFFFF' '#0F0F10' '#FF8A00'
 
-Źródło (pi/logo-startowe.png): czarne tło, białe „BEE”, pomarańczowe (#FF8A00) „NEST”, z wygładzonymi
+Źródło (pi/boot-logo.png): czarne tło, białe „BEE”, pomarańczowe (#FF8A00) „NEST”, z wygładzonymi
 krawędziami. Każdy piksel to mieszanka czerni, bieli i pomarańczu: niebieski kanał pochodzi tylko od bieli,
 a czerwony od bieli i pomarańczu – z tego wychodzą udziały obu kolorów i piksel składa się od nowa
 z kolorów motywu (krawędzie zostają gładkie). Woła go app.py (update_boot_logo) po zmianie motywu wyświetlacza.

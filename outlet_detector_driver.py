@@ -6,10 +6,10 @@ Wylotek: serwomechanizm MG-996R, który otwiera albo blokuje wylot ula.
 
 Wymaga w /boot/firmware/config.txt: dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4 (kanał 1 = buzzer).
 
-Serwo nie mówi, gdzie jest – read() zwraca ostatnią pozycję, którą mu zadaliśmy (zapisaną w data/wylotek,
+Serwo nie mówi, gdzie jest – read() zwraca ostatnią pozycję, którą mu zadaliśmy (zapisaną w data/outlet,
 więc przeżywa restart). Zmiana pozycji: set_position(procent) – od razu i bez czekania, więc suwak na stronie
 może wysyłać kolejne pozycje w trakcie przesuwania. Impulsy gasną MOVE_SECONDS po ostatniej komendzie.
-Steruje app.py (POST /api/wylotek i reguły godzinowe).
+Steruje app.py (POST /api/outlet i reguły godzinowe).
 
 Kalibracja: PULSE_BLOCKED_US i PULSE_OPEN_US to długości impulsu dla „zablokowany” i „otwarty”.
 MG-996R 180° rozumie około 500–2500 µs (0–180°). Zacznij od wartości poniżej i poprawiaj po kawałku,
@@ -29,18 +29,20 @@ PULSE_OPEN_US = 2000            # impuls dla 100 % (otwarty)
 MOVE_SECONDS = 1.5              # tyle po ostatniej komendzie trwa ruch, potem impulsy gasną
 HOLD = False                    # True = serwo trzyma pozycję cały czas (prąd i buczenie); zasuwa zwykle nie musi
 
-STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "wylotek")
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "outlet")
 _lock = threading.Lock()
 _off_timer = None
 _demo_position = 100.0
 
 
 def _saved():
-    try:
-        with open(STATE_FILE, encoding="ascii") as f:
-            return float(f.read().strip())
-    except (OSError, ValueError):
-        return None
+    for path in (STATE_FILE, os.path.join(os.path.dirname(STATE_FILE), "wylotek")):   # druga: nazwa sprzed 2026-11-21
+        try:
+            with open(path, encoding="ascii") as f:
+                return float(f.read().strip())
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def _release():

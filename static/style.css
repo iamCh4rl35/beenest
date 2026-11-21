@@ -48,7 +48,7 @@ textarea {
   --shadow: 0 4px 20px rgba(15, 15, 16, .04);
   --font: "Lexend", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
-  /* ===== ANIMACJE i WYKRESY – wartości ustawiasz w data/global.conf, sekcja [wyglad].
+  /* ===== ANIMACJE i WYKRESY – wartości ustawiasz w data/global.conf, sekcja [look].
      Te poniżej to tylko zapas, gdy strona jest otwarta bez serwera. ===== */
   --anim-duration: .4s;
   /* czas: przełącznik kamer/kategorii, listy, okna (większy = wolniej) */
@@ -77,7 +77,7 @@ textarea {
 
 /* Zmienne zależne od motywu liczone na <body>, żeby widziały jego kolor akcentu */
 body {
-  /* ===== HOVER KART w Menu Głównym – ustawiasz w data/global.conf, [wyglad]; tu tylko zapas ===== */
+  /* ===== HOVER KART w Menu Głównym – ustawiasz w data/global.conf, [look]; tu tylko zapas ===== */
   --hover-lift: -4px;
   /* o ile karta unosi się w górę (0 = wcale) */
   --hover-glow: 0 14px 36px color-mix(in srgb, var(--orange) 32%, transparent);
@@ -93,7 +93,7 @@ body {
 }
 
 /* ---------- MOTYWY ---------- */
-body[data-theme="lekki-miodek"] {
+body[data-theme="light-honey"] {
   --bg: #FFF8E7;
   --card-background: #FFFFFF;
   --black: #4A2F1A;
@@ -106,7 +106,7 @@ body[data-theme="lekki-miodek"] {
   --dock-border: rgba(255, 228, 181, 0.6);
 }
 
-body[data-theme="nocna-czern"] {
+body[data-theme="night-black"] {
   --bg: #000000;
   --card-background: #141414;
   --black: #FFFFFF;
@@ -120,7 +120,7 @@ body[data-theme="nocna-czern"] {
   --shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
 
-body[data-theme="miodna-szarosc"] {
+body[data-theme="honey-grey"] {
   --bg: #1A1408;
   --card-background: #2D2415;
   --black: #FFF3DC;
@@ -135,14 +135,14 @@ body[data-theme="miodna-szarosc"] {
 }
 
 /* ---------- WYSOKI KONTRAST ---------- */
-body[data-contrast="high"][data-theme="bialy-pylek"] {
+body[data-contrast="high"][data-theme="white-pollen"] {
   --orange: #000000;
   --orange-dark: #000000;
   --orange-soft: #F0F0F0;
   --muted: #333333;
 }
 
-body[data-contrast="high"][data-theme="nocna-czern"] {
+body[data-contrast="high"][data-theme="night-black"] {
   --orange: #FFFFFF;
   --orange-dark: #FFFFFF;
   --orange-soft: #333333;
@@ -151,14 +151,14 @@ body[data-contrast="high"][data-theme="nocna-czern"] {
   /* tło włączonego przełącznika jest tu białe, więc kulka musi być czarna */
 }
 
-body[data-contrast="high"][data-theme="lekki-miodek"] {
+body[data-contrast="high"][data-theme="light-honey"] {
   --bg: #FFF2E0;
   --black: #1A1A1A;
   --line: #D6C5B3;
   --orange: #E65100;
 }
 
-body[data-contrast="high"][data-theme="miodna-szarosc"] {
+body[data-contrast="high"][data-theme="honey-grey"] {
   --bg: #000000;
   --black: #FFFFFF;
   --line: #555555;
@@ -234,11 +234,54 @@ main {
   display: none;
   flex: 1;
   flex-direction: column;
-  animation: fade .22s ease backwards;   /* backwards, nie both: po animacji nie zostaje transform (psułby position:fixed wewnątrz strony) */
 }
 
 .page.active {
   display: flex;
+}
+
+/* Przejście między stronami (route() w app.js): otwierana karta wjeżdża z prawej, poprzednia zanika i maleje
+   ku środkowi; powrót do panelu głównego odwrotnie. Klasy znikają po animacji – transform zostawiony na stronie
+   psułby position:fixed w jej środku. */
+:root {
+  --page-duration: .4s;      /* = PAGE_TIME w app.js */
+}
+
+main {
+  position: relative;        /* odchodząca strona leży na czas animacji absolutnie w <main> */
+}
+
+main.is-turning {
+  overflow: hidden;          /* wjeżdżająca z prawej strona nie robi poziomego paska przewijania */
+}
+
+.page.page-leaving {
+  display: flex;
+  position: absolute;
+  pointer-events: none;
+}
+
+.page-leaving,
+.page-entering {
+  animation-duration: var(--page-duration);
+  animation-timing-function: cubic-bezier(.22, .8, .24, 1);
+  animation-fill-mode: both;
+}
+
+.from-right { animation-name: page-in-right; position: relative; z-index: 1; }
+.to-back    { animation-name: page-out-back; z-index: 0; }
+.from-back  { animation-name: page-in-back; }
+.to-right   { animation-name: page-out-right; z-index: 2; }
+
+@keyframes page-in-right  { from { transform: translateX(calc(100% + 40px)); } }
+@keyframes page-out-back  { to   { opacity: 0; transform: scale(.9); } }
+@keyframes page-in-back   { from { opacity: 0; transform: scale(.9); } }
+@keyframes page-out-right { to   { transform: translateX(calc(100% + 40px)); } }
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --page-duration: .01s;
+  }
 }
 
 @keyframes fade {
@@ -334,10 +377,6 @@ main {
   grid-template-columns: 1fr 1fr;
   grid-template-rows: auto 1fr;
   column-gap: 14px;
-}
-
-.panel-card.is-featured.single .temp-section {
-  grid-column: 1 / -1;
 }
 
 .panel-card.is-featured .card-header {
@@ -492,24 +531,6 @@ main {
 
 .dash-card:hover::before {
   transform: scaleY(1);
-}
-
-.dash-card.monitoring {
-  justify-content: center;
-  align-items: center;
-  text-align: center;
-  font-size: clamp(26px, 3.5vw, 34px);
-  font-weight: 900;
-}
-
-.dash-card.monitoring .arrow {
-  color: var(--orange);
-  margin-left: 5px;
-  transition: transform .2s;
-}
-
-.dash-card.monitoring:hover .arrow {
-  transform: translateX(4px);
 }
 
 .dash-card.settings {
@@ -866,7 +887,8 @@ body[data-contrast="high"] .stat.primary .unit {
   max-width: 300px;
 }
 
-.numpad-ok {
+.numpad .numpad-ok {
+  align-self: center;        /* .back-btn (niżej w pliku) ma align-self: flex-start */
   margin: 0;
   min-width: 160px;
   font-family: inherit;
@@ -933,13 +955,6 @@ body[data-contrast="high"] .stat.primary .unit {
 .back-btn:disabled {
   opacity: .55;
   cursor: progress;
-}
-
-/* Przyciski w ustawieniach (zasilanie, aktualizacja) */
-.btn-row {
-  display: flex;
-  gap: 10px;
-  width: 100%;
 }
 
 .btn-wide {
@@ -2433,10 +2448,6 @@ body[data-contrast="high"] .chart-line {
     padding: 8px 10px;
   }
 
-  /* Cztery kategorie ustawień (z Wylotkiem) w jednym rzędzie telefonu: bez ikon */
-  .settings-sidebar .camera-dock-btn svg {
-    display: none;
-  }
 
   .page-bar {
     grid-template-columns: 1fr;
@@ -2462,30 +2473,6 @@ body[data-contrast="high"] .chart-line {
 /* =====================================================
    ZABEZPIECZENIA: kłódka w pasku, PIN, blokada, parowanie, urządzenia, kody QR
    ===================================================== */
-/* Ustawienia → Działanie: dwie kolumny na szerokich ekranach */
-@media (min-width: 851px) {
-  .settings-cols {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    column-gap: 26px;
-    align-items: start;
-  }
-
-  .settings-cols .setting-row {
-    gap: 12px;
-  }
-
-  .settings-cols .dd-trigger {
-    min-width: 0;            /* lista tak szeroka jak jej tekst – podpis ma więcej miejsca */
-    gap: 8px;
-    padding-left: 13px;
-  }
-
-  .settings-col .setting-group:last-child {
-    margin-bottom: 0;
-  }
-}
-
 /* Kłódka na środku paska: logo | kłódka | zegar */
 @media (min-width: 851px) {
   .topbar {
@@ -2539,13 +2526,13 @@ body[data-contrast="high"] .chart-line {
 }
 
 .lock-btn[data-mode="pin"],
-.lock-btn[data-mode="klucz"] {
+.lock-btn[data-mode="key"] {
   background: var(--orange);
   color: #fff;
 }
 
 body[data-contrast="high"] .lock-btn[data-mode="pin"],
-body[data-contrast="high"] .lock-btn[data-mode="klucz"] {
+body[data-contrast="high"] .lock-btn[data-mode="key"] {
   color: var(--bg);
 }
 
@@ -2888,6 +2875,31 @@ body[data-contrast="high"] .qr-dot {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+/* Działanie → Zasilanie: dwa przyciski w jednym wierszu (jedna kolumna musi się zmieścić na 1024×600) */
+.setting-control.power-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.power-buttons .back-btn {
+  width: auto;
+  white-space: nowrap;
+}
+
+/* Panel ustawień (openSheet): treść przewija się sama, nagłówek z krzyżykiem zostaje na miejscu */
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sheet-body > .setting-row:last-child {
+  border-bottom: none;
 }
 
 .side-head h2 {
@@ -3250,7 +3262,8 @@ body[data-contrast="high"] .qr-dot {
 }
 
 @media (min-width: 851px) and (max-height: 720px) {
-  .settings-cols .setting-row {
+  /* Działanie w jednej kolumnie: 8 wierszy w 2 grupach mieści się na 1024×600 dopiero z tym odstępem */
+  #settings-operation .setting-row {
     padding-top: 7px;
     padding-bottom: 7px;
   }
@@ -3446,9 +3459,10 @@ body[data-contrast="high"] .qr-dot {
 
 .range {
   flex: 1;
-  height: 8px;
+  height: 14px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--orange) 25%, var(--line));
+  border: 2px dashed var(--orange);          /* krawędź jak przycisk „+ Dodaj regułę otwarcia” */
+  background: color-mix(in srgb, var(--orange) 22%, transparent);
   -webkit-appearance: none;
   appearance: none;
   outline: none;
@@ -3630,7 +3644,7 @@ html.crt-off body {
 }
 
 /* ---------- TELEFON I KOMPUTER: kafelki jako osobne karty (jak reszta menu głównego) ---------- */
-body[data-urzadzenie="telefon"] .dash-card.quad {
+body[data-device="phone"] .dash-card.quad {
   gap: 20px;
   padding: 0;
   overflow: visible;
@@ -3640,11 +3654,11 @@ body[data-urzadzenie="telefon"] .dash-card.quad {
 }
 
 /* Parowanie obok Estetyki (na wyświetlaczu zostaje w siatce 2 × 2 na swoim miejscu) */
-body[data-urzadzenie="telefon"] #tile-pair {
+body[data-device="phone"] #tile-pair {
   order: 4;
 }
 
-body[data-urzadzenie="telefon"] .quad-tile {
+body[data-device="phone"] .quad-tile {
   gap: 10px;
   overflow: visible;
   border: 4px solid var(--orange-dark);
@@ -3655,7 +3669,7 @@ body[data-urzadzenie="telefon"] .quad-tile {
   transition: transform .2s, border-color .2s, box-shadow .25s, background .3s;
 }
 
-body[data-urzadzenie="telefon"] .quad-tile:hover {
+body[data-device="phone"] .quad-tile:hover {
   transform: translateY(var(--hover-lift));
   border-color: var(--orange);
   background: var(--card-background);
@@ -3668,34 +3682,34 @@ body[data-urzadzenie="telefon"] .quad-tile:hover {
    ciemne tła (przyciski, karty, linie) są więc rozjaśnione tak, żeby kanały były powyżej progu – na tym
    panelu wyglądają jak oryginalne kolory na dobrym ekranie. Telefony i komputery mają kolory bez zmian. */
 /* Szarości lekko ciepłe: neutralne #333333 panel pokazuje zielonkawo (wybór użytkownika z planszy: #38312F) */
-body[data-urzadzenie="wyswietlacz"][data-theme="nocna-czern"] {
+body[data-device="display"][data-theme="night-black"] {
   --card-background: #38312F;
   --line: #554B48;
   --orange-soft: #5C3A00;
   --dock-bg: rgba(56, 49, 47, 0.75);
 }
 
-body[data-urzadzenie="wyswietlacz"][data-theme="miodna-szarosc"] {
+body[data-device="display"][data-theme="honey-grey"] {
   --card-background: #463820;
   --line: #66542F;
   --orange-soft: #5E4818;
   --dock-bg: rgba(70, 56, 32, 0.8);
 }
 
-body[data-urzadzenie="wyswietlacz"][data-theme="miodna-szarosc"]:not([data-contrast="high"]) {
+body[data-device="display"][data-theme="honey-grey"]:not([data-contrast="high"]) {
   --bg: #2E2410;
 }
 
-body[data-urzadzenie="wyswietlacz"][data-contrast="high"][data-theme="nocna-czern"] {
+body[data-device="display"][data-contrast="high"][data-theme="night-black"] {
   --orange-soft: #555555;
 }
 
-body[data-urzadzenie="wyswietlacz"][data-contrast="high"][data-theme="miodna-szarosc"] {
+body[data-device="display"][data-contrast="high"][data-theme="honey-grey"] {
   --line: #6A6A6A;
 }
 
 /* Kafelki „Ustawienia”: 9 % pomarańczu na ciemnej karcie znika w czerni – pełne tło przycisku */
-body[data-urzadzenie="wyswietlacz"][data-theme="nocna-czern"] .quad-tile,
-body[data-urzadzenie="wyswietlacz"][data-theme="miodna-szarosc"] .quad-tile {
+body[data-device="display"][data-theme="night-black"] .quad-tile,
+body[data-device="display"][data-theme="honey-grey"] .quad-tile {
   background: var(--orange-soft);
 }

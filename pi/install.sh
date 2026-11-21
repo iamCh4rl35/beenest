@@ -2,12 +2,13 @@
 # =============================================================
 #  BEENest – konfiguracja Raspberry Pi (można uruchamiać wielokrotnie)
 #
-#    sudo bash pi/instaluj.sh              serwer jako usługa, hotspot, kiosk, logo startowe
-#    sudo bash pi/instaluj.sh --blokada    do tego: brak terminala z klawiatury, zarządzanie tylko po SSH
-#    sudo bash pi/instaluj.sh --odblokuj   cofa blokadę (kiosk, hotspot i logo zostają)
-#    sudo bash pi/instaluj.sh --pulpit     zamiast kiosku zwykły pulpit Raspberry (do prac przy Pi)
+#    sudo bash pi/install.sh            serwer jako usługa, hotspot, kiosk, logo startowe
+#    sudo bash pi/install.sh --lock     do tego: brak terminala z klawiatury, zarządzanie tylko po SSH
+#    sudo bash pi/install.sh --unlock   cofa blokadę (kiosk, hotspot i logo zostają)
+#    sudo bash pi/install.sh --desktop  zamiast kiosku zwykły pulpit Raspberry (do prac przy Pi)
 #
-#  Oryginały zmienianych plików systemowych są zapisywane obok z końcówką .przed-beenest
+#  Oryginały zmienianych plików systemowych są zapisywane obok z końcówką .before-beenest
+#  (starsze wersje skryptu: .przed-beenest – taka kopia też się liczy, nie powstaje druga)
 # =============================================================
 set -euo pipefail
 
@@ -24,16 +25,16 @@ CONFIG=/boot/firmware/config.txt
 LIGHTDM=/etc/lightdm/lightdm.conf
 KIOSK_CONF=/etc/beenest/labwc   # konfiguracja labwc sesji kiosku (root – użytkownik jej nie zmieni)
 USER_LABWC="$HOME_DIR/.config/labwc"
-CURSOR_THEME=beenest-bez-kursora   # /usr/share/icons/<nazwa>: same przezroczyste kursory
-# Zakres kolorów HDMI (pi/hdmi_zakres.py): ograniczony = 16–235 (Waveshare 7" ucina oba końce pełnego
-# zakresu), pelny = 0–255, auto = jak sterownik. Inny monitor: zmień i uruchom skrypt ponownie.
-HDMI_RANGE=ograniczony
+CURSOR_THEME=beenest-no-cursor   # /usr/share/icons/<nazwa>: same przezroczyste kursory
+# Zakres kolorów HDMI (pi/hdmi_range.py): limited = 16–235 (Waveshare 7" ucina oba końce pełnego
+# zakresu), full = 0–255, auto = jak sterownik. Inny monitor: zmień i uruchom skrypt ponownie.
+HDMI_RANGE=limited
 MODE=${1:-}
 
 say() { echo; echo "== $*"; }
 
 backup() {   # kopia oryginału tylko za pierwszym razem
-    [ -e "$1" ] && [ ! -e "$1.przed-beenest" ] && cp -a "$1" "$1.przed-beenest" || true
+    [ -e "$1" ] && [ ! -e "$1.before-beenest" ] && [ ! -e "$1.przed-beenest" ] && cp -a "$1" "$1.before-beenest" || true
 }
 
 cmdline_add() { grep -qw -- "$1" "$CMDLINE" || sed -i "1 s|\$| $1|" "$CMDLINE"; }
@@ -54,8 +55,8 @@ kiosk_config() {
 # BEENest – sesja kiosku: tylko przeglądarka z panelem ula
 /usr/bin/kanshi &
 # Logo jako tło, zanim Chromium wczyta panel (Plymouth znika już ok. 7 s po starcie, panel jest ok. 14 s);
-# pi/tlo.sh bierze logo w kolorach motywu wyświetlacza (data/logo.png od serwera)
-/bin/sh $PI_DIR/tlo.sh &
+# pi/background.sh bierze logo w kolorach motywu wyświetlacza (data/logo.png od serwera)
+/bin/sh $PI_DIR/background.sh &
 /usr/bin/lwrespawn /bin/sh $PI_DIR/kiosk.sh &   # przez sh – działa bez prawa wykonywania pliku
 EOF
     local layout options keys mouse
@@ -98,7 +99,7 @@ EOF
 # -------------------------------------------------------------
 #  Zwykły pulpit zamiast kiosku
 # -------------------------------------------------------------
-if [ "$MODE" = "--pulpit" ]; then
+if [ "$MODE" = "--desktop" ]; then
     autologin_session rpd-labwc
     echo "Po restarcie uruchomi się pulpit. Powrót do kiosku: sudo bash $0"
     exit 0
@@ -107,7 +108,7 @@ fi
 # -------------------------------------------------------------
 #  Cofnięcie blokady
 # -------------------------------------------------------------
-if [ "$MODE" = "--odblokuj" ]; then
+if [ "$MODE" = "--unlock" ]; then
     say "Cofam blokadę"
     rm -f /etc/systemd/logind.conf.d/90-beenest.conf /etc/sysctl.d/90-beenest.conf \
           /etc/ssh/sshd_config.d/90-beenest.conf /etc/chromium/policies/managed/beenest.json
@@ -233,7 +234,7 @@ systemctl restart beenest.service
 #  4. Kiosk: osobna sesja – tylko Chromium z panelem ula, bez pulpitu
 # -------------------------------------------------------------
 say "Kiosk"
-chmod +x "$PI_DIR/kiosk.sh" "$PI_DIR/tlo.sh"
+chmod +x "$PI_DIR/kiosk.sh" "$PI_DIR/background.sh"
 # Pierwsza wersja tego skryptu dopisywała kiosk do autostartu pulpitu – sprzątamy
 grep -qs "BEENest" "$USER_LABWC/autostart" && rm -f "$USER_LABWC/autostart"
 cat > /usr/local/bin/beenest-kiosk <<EOF
@@ -244,7 +245,7 @@ if raspi-config nonint is_pi; then
     raspi-config nonint gpu_has_mmu || export WLR_RENDERER=pixman
 fi
 # Zakres kolorów HDMI – da się go zmienić tylko teraz, zanim labwc przejmie ekran (wynik w dzienniku)
-python3 $PI_DIR/hdmi_zakres.py $HDMI_RANGE 2>&1 | logger -t beenest-hdmi
+python3 $PI_DIR/hdmi_range.py $HDMI_RANGE 2>&1 | logger -t beenest-hdmi
 exec /usr/bin/labwc -C $KIOSK_CONF
 EOF
 chmod 755 /usr/local/bin/beenest-kiosk
@@ -261,7 +262,7 @@ CURSORS=/usr/share/icons/$CURSOR_THEME/cursors
 mkdir -p "$CURSORS"
 printf '[Icon Theme]\nName=%s\nComment=BEENest – niewidoczny kursor (ekran dotykowy)\n' "$CURSOR_THEME" \
     > "/usr/share/icons/$CURSOR_THEME/index.theme"
-python3 - "$CURSORS/niewidoczny" <<'EOF'
+python3 - "$CURSORS/invisible" <<'EOF'
 import struct, sys
 size = 24
 image = struct.pack("<9I", 36, 0xFFFD0002, size, 1, size, size, 0, 0, 0) + bytes(4 * size * size)
@@ -270,10 +271,10 @@ with open(sys.argv[1], "wb") as f:
     f.write(b"Xcur" + struct.pack("<3I", 16, 0x10000, 1) + toc + image)
 EOF
 for name in /usr/share/icons/{PiXtrix,Adwaita,default}/cursors/*; do
-    if [ -e "$name" ]; then ln -sfn niewidoczny "$CURSORS/$(basename "$name")"; fi
+    if [ -e "$name" ]; then ln -sfn invisible "$CURSORS/$(basename "$name")"; fi
 done
 # Blokada zostaje, jeśli była włączona wcześniej
-if [ "$MODE" = "--blokada" ] || [ -e /etc/systemd/logind.conf.d/90-beenest.conf ]; then
+if [ "$MODE" = "--lock" ] || [ -e /etc/systemd/logind.conf.d/90-beenest.conf ]; then
     kiosk_config 1
 else
     kiosk_config 0
@@ -289,7 +290,7 @@ mkdir -p "$THEME"
 cp /usr/share/plymouth/themes/pix/pix.script "$THEME/beenest.script"
 # Logo w kolorach motywu wyświetlacza, jeśli serwer już je przygotował (data/logo.png), inaczej oryginał
 if [ -s "$APP_DIR/data/logo.png" ]; then cp "$APP_DIR/data/logo.png" "$THEME/splash.png"
-else cp "$PI_DIR/logo-startowe.png" "$THEME/splash.png"; fi
+else cp "$PI_DIR/boot-logo.png" "$THEME/splash.png"; fi
 cat > "$THEME/beenest.plymouth" <<EOF
 [Plymouth Theme]
 Name=beenest
@@ -311,47 +312,48 @@ if command -v rpi-eeprom-config >/dev/null && rpi-eeprom-config | grep -q "^NET_
     rpi-eeprom-config | sed 's/^NET_INSTALL_AT_POWER_ON=1/NET_INSTALL_AT_POWER_ON=0/' > /tmp/beenest-eeprom.conf
     rpi-eeprom-config --apply /tmp/beenest-eeprom.conf
 fi
+[ -e "$THEME/.w-initramfs" ] && mv "$THEME/.w-initramfs" "$THEME/.in-initramfs"   # nazwa sprzed 2026-11-21
 if [ "$(plymouth-set-default-theme)" != beenest ]; then
     plymouth-set-default-theme -R beenest    # przebudowuje initramfs (chwilę trwa)
-elif ! cmp -s "$THEME/splash.png" /usr/share/plymouth/themes/beenest/.w-initramfs 2>/dev/null; then
+elif ! cmp -s "$THEME/splash.png" /usr/share/plymouth/themes/beenest/.in-initramfs 2>/dev/null; then
     update-initramfs -u                      # Plymouth czyta logo z initramfs – nowe logo wchodzi po przebudowie
 fi
-cp "$THEME/splash.png" "$THEME/.w-initramfs"  # co jest teraz w initramfs (żeby nie przebudowywać bez potrzeby)
+cp "$THEME/splash.png" "$THEME/.in-initramfs"  # co jest teraz w initramfs (żeby nie przebudowywać bez potrzeby)
 # Zmiana motywu na wyświetlaczu = nowe data/logo.png (serwer, update_boot_logo). Usługa beenest-logo (root)
-# kopiuje je do motywu Plymouth i przebudowuje initramfs (około minuty, w tle). Tło kiosku (pi/tlo.sh) bierze je od razu.
-cat > /usr/local/bin/beenest-logo <<SKRYPT
+# kopiuje je do motywu Plymouth i przebudowuje initramfs (około minuty, w tle). Tło kiosku (pi/background.sh) bierze je od razu.
+cat > /usr/local/bin/beenest-logo <<SCRIPT
 #!/bin/sh
 SRC="$APP_DIR/data/logo.png"
 DST="$THEME/splash.png"
 [ -s "\$SRC" ] || exit 0
-cmp -s "\$SRC" "$THEME/.w-initramfs" && exit 0       # to logo już jest w initramfs – bez przebudowy
+cmp -s "\$SRC" "$THEME/.in-initramfs" && exit 0       # to logo już jest w initramfs – bez przebudowy
 head -c 8 "\$SRC" | grep -q PNG || exit 1            # tylko prawdziwy PNG
 cp "\$SRC" "\$DST.tmp" && mv "\$DST.tmp" "\$DST"
-update-initramfs -u && cp "\$DST" "$THEME/.w-initramfs"
-SKRYPT
+update-initramfs -u && cp "\$DST" "$THEME/.in-initramfs"
+SCRIPT
 chmod 755 /usr/local/bin/beenest-logo
-cat > /etc/systemd/system/beenest-logo.service <<SKRYPT
+cat > /etc/systemd/system/beenest-logo.service <<SCRIPT
 [Unit]
 Description=BEENest – logo startowe w kolorach motywu wyświetlacza
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/beenest-logo
-SKRYPT
-cat > /etc/systemd/system/beenest-logo.path <<SKRYPT
+SCRIPT
+cat > /etc/systemd/system/beenest-logo.path <<SCRIPT
 [Unit]
 Description=BEENest – czeka na nowe logo startowe od serwera
 [Path]
 PathChanged=$APP_DIR/data/logo.png
 [Install]
 WantedBy=multi-user.target
-SKRYPT
+SCRIPT
 systemctl daemon-reload
 systemctl enable --now beenest-logo.path
 
 # -------------------------------------------------------------
-#  6. Blokada (tylko z --blokada): klawiatura przy ulu nie da terminala ani pulpitu
+#  6. Blokada (tylko z --lock): klawiatura przy ulu nie da terminala ani pulpitu
 # -------------------------------------------------------------
-if [ "$MODE" = "--blokada" ]; then
+if [ "$MODE" = "--lock" ]; then
     say "Blokada"
     # SSH zostaje bez zmian: klucz albo hasło użytkownika $USER_NAME.
     rm -f /etc/ssh/sshd_config.d/90-beenest.conf

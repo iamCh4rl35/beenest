@@ -12,8 +12,8 @@ import subprocess
 import time
 
 # Dane demonstracyjne zamiast czujników: na komputerze z testami (nie ma /proc/device-tree)
-# albo na życzenie: BEENEST_CZUJNIKI_DEMO=1 python3 app.py
-DEMO = os.environ.get("BEENEST_CZUJNIKI_DEMO") == "1" or not os.path.exists("/proc/device-tree/model")
+# albo na życzenie: BEENEST_SENSOR_DEMO=1 python3 app.py
+DEMO = os.environ.get("BEENEST_SENSOR_DEMO") == "1" or not os.path.exists("/proc/device-tree/model")
 
 
 # -------------------------------------------------------------

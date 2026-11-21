@@ -16,17 +16,23 @@ Jak to działa:
      więc kilka telefonów naraz nie obciąża magistrali I2C.
 
 Uruchomienie:   pip install -r requirements.txt     (raz)
-                python3 app.py
-                  - port: domyślnie 80 (wtedy działa samo http://beenest.local), a gdy się nie da – 8000;
-                    własny port: BEENEST_PORT=8080 python3 app.py
-                  - BEENEST_DEBUG=1 python3 app.py  -> tryb deweloperski (auto-reload, port 8000)
-                python3 app.py --ustaw-pin          -> ustawia PIN administratora (6 cyfr) i kończy
+                python3 app.py                    -> port 80 (działa http://beenest.local), gdy zajęty / brak prawa – 8000
+                python3 app.py --set-pin          -> ustawia PIN administratora (6 cyfr) i kończy;
+                                                     działa także przy uruchomionym serwerze
+Zmienne środowiskowe (można łączyć, np. BEENEST_PORT=8077 BEENEST_NO_SECURITY=1 python3 app.py):
+    BEENEST_PORT=8080          własny port (bez zapasowego 8000)
+    BEENEST_DEBUG=1            tryb deweloperski: auto-reload po zmianie .py, port 8000, błędy w przeglądarce
+    BEENEST_NO_SECURITY=1      testy: każde urządzenie jest administratorem, bez parowania i PIN-u
+    BEENEST_SENSOR_DEMO=1      czujniki z danymi przykładowymi (na komputerze bez Raspberry włącza się samo)
+    BEENEST_CAMERA_DEMO=1      kamera bez sprzętu (szara klatka zamiast picamera2)
+    BEENEST_USB=/katalog       testy Klucza: każdy podkatalog udaje wpięty pendrive (bez montowania udisks)
 Po starcie serwer wypisuje adresy do wpisania na telefonie (http://..., bez "s").
 """
 import atexit
 import configparser
 import contextlib
 import datetime
+import functools
 import getpass
 import glob
 import hashlib
@@ -79,7 +85,7 @@ from wellbeing_detector_driver import WELLBEING_OK_HZ, WELLBEING_SENSITIVE_HZ, W
 # Wylotek: pozycja serwa w %. Poniżej/powyżej progów = zablokowany/otwarty, pomiędzy = w ruchu.
 OUTLET_BLOCKED_BELOW = 5
 OUTLET_OPEN_ABOVE = 95
-OUTLET_MAX_RULES = 6        # reguły otwarcia wylotka o godzinie (global.conf [wylotek])
+OUTLET_MAX_RULES = 6        # reguły otwarcia wylotka o godzinie (global.conf [outlet])
 
 SENSORS = (atmosphere, wellbeing, feeder, outlet)
 
@@ -114,27 +120,27 @@ CHART_RANGES = {
 # klucz: (wartość domyślna, dozwolone wartości; None = tak/nie)
 CONF_PATH = os.path.join(ROOT, "data", "global.conf")
 
-# [zapis] – dotyczą Raspberry, wspólne dla wszystkich urządzeń
+# [storage] – dotyczą Raspberry, wspólne dla wszystkich urządzeń
 SERVER_SETTINGS = {
     "saveInterval":  ("60", {"1", "5", "10", "30", "60", "180"}),   # częstotliwość zapisu - minuty
     "dataRetention": ("12", {"1", "3", "6", "12", "24"}),           # przetrzymywanie danych - miesiące
     "feederRate":    (True, None),
 }
 
-# [urzadzenie <adres IP>] – osobno dla każdego telefonu / komputera / wyświetlacza
-_HL, _RG = {"w-ulu", "na-zewnatrz"}, {"obecna", "min-24h", "max-24h"}
+# [device <adres IP>] – osobno dla każdego telefonu / komputera / wyświetlacza
+_HL, _RG = {"inside", "outside"}, {"current", "min-24h", "max-24h"}
 DEVICE_SETTINGS = {
-    "theme":             ("bialy-pylek", {"bialy-pylek", "lekki-miodek", "nocna-czern", "miodna-szarosc"}),
+    "theme":             ("white-pollen", {"white-pollen", "light-honey", "night-black", "honey-grey"}),
     "highContrast":      (False, None),
-    "atmoData":          ("temperatura", {"temperatura", "wilgoc", "cisnienie"}),
-    "tempHighlight":     ("w-ulu", _HL),
-    "tempRange":         ("obecna", _RG),
-    "humidityHighlight": ("w-ulu", _HL),
-    "humidityRange":     ("obecna", _RG),
-    "pressureHighlight": ("w-ulu", _HL),
-    "pressureRange":     ("obecna", _RG),
-    "wellbeingData":     ("stan", {"stan", "natezenie", "czestotliwosci"}),
-    "feederData":        ("poziom", {"poziom", "ostatnie"}),
+    "atmoData":          ("temperature", {"temperature", "humidity", "pressure"}),
+    "tempHighlight":     ("inside", _HL),
+    "tempRange":         ("current", _RG),
+    "humidityHighlight": ("inside", _HL),
+    "humidityRange":     ("current", _RG),
+    "pressureHighlight": ("inside", _HL),
+    "pressureRange":     ("current", _RG),
+    "wellbeingData":     ("status", {"status", "loudness", "frequency"}),
+    "feederData":        ("level", {"level", "last-refill"}),
     "feederAlarm":       (True, None),
     "feederWords":       (True, None),      # poziom dokarmiaczki słownie (Pełny, Zapas płynu…) zamiast w %
     "camera":            ("external", {"external", "internal"}),
@@ -144,7 +150,7 @@ DEVICE_SETTINGS = {
 # Ustawienia urządzenia z zakładki Działanie – jak cała ta zakładka zmienia je tylko administrator
 ADMIN_DEVICE_SETTINGS = {"feederAlarm"}
 
-# [wyglad] – stałe dla całej strony (zmienne CSS). Nazwa = zmienna CSS bez "--".
+# [look] – stałe dla całej strony (zmienne CSS). Nazwa = zmienna CSS bez "--".
 LOOK_SETTINGS = {
     "anim-duration":       (".4s", "czas animacji: przełącznik kamer/kategorii, listy, okna (większy = wolniej)"),
     "anim-ease":           ("cubic-bezier(.32, .72, 0, 1)", "krzywa animacji; inne: ease-in-out | cubic-bezier(.34, 1.56, .64, 1) = sprężyna"),
@@ -169,12 +175,13 @@ PAIR_CODE_TIME = 2 * 60     # s – ważność kodu parowania (i czas na zatwier
 PAIR_CODE_TRIES = 5         # błędnych prób, po których kod parowania przestaje działać
 TEMP_DEVICE_TIME = 10 * 60  # s – niezapamiętane urządzenie wygasa po tylu sekundach bez zapytań (opuścił stronę / sieć)
 REMEMBER_DAYS = 365         # ważność ciasteczka zapamiętanego urządzenia (odnawia się przy każdym wejściu)
-KEY_FILE = "beenest.klucz"  # plik z sekretem na pendrivie (Klucz)
+KEY_FILE = "beenest.key"  # plik z sekretem na pendrivie (Klucz)
+LEGACY_KEY_FILE = "beenest.klucz"   # nazwa sprzed 2026-11-21 – takie Klucze nadal działają
 HOTSPOT_CONNECTION = "Pi-hotspot"   # połączenie NetworkManagera z hotspotem (nazwa sieci i hasło do kodu QR)
 DISPLAY_ADDRESSES = ("127.0.0.1", "::1")   # wyświetlacz przy ulu = przeglądarka na samym Raspberry
 HOTSPOT_PREFIX = "10.42.0."                # adresy telefonów w hotspocie NetworkManagera
-DHCP_NAMES = "/run/beenest-dhcp"           # nazwy urządzeń z DHCP hotspotu (plik = adres IP; pi/instaluj.sh)
-NO_SECURITY = os.environ.get("BEENEST_BEZ_ZABEZPIECZEN") == "1"   # testy na PC: każdy jest administratorem
+DHCP_NAMES = "/run/beenest-dhcp"           # nazwy urządzeń z DHCP hotspotu (plik = adres IP; pi/install.sh)
+NO_SECURITY = os.environ.get("BEENEST_NO_SECURITY") == "1"   # testy na PC: każdy jest administratorem
 
 # -------------------------------------------------------------
 #  Ciche logi (strona odpytuje serwer co 5 s – bez wpisu o każdym żądaniu)
@@ -246,14 +253,22 @@ def to_number(v):
 #  Baza (SQLite): ustawienia serwera + historia
 # -------------------------------------------------------------
 
+_db_ready = False
+
+
 @contextlib.contextmanager
 def db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    """Połączenie z bazą; schemat (tabele, indeks) zakładany raz na uruchomienie serwera."""
+    global _db_ready
+    if not _db_ready:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     con = sqlite3.connect(DB_PATH, timeout=10)
     try:
-        con.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)")
-        con.execute("CREATE TABLE IF NOT EXISTS readings (ts INTEGER, key TEXT, value REAL)")
-        con.execute("CREATE INDEX IF NOT EXISTS idx_readings ON readings (key, ts)")
+        if not _db_ready:
+            con.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)")
+            con.execute("CREATE TABLE IF NOT EXISTS readings (ts INTEGER, key TEXT, value REAL)")
+            con.execute("CREATE INDEX IF NOT EXISTS idx_readings ON readings (key, ts)")
+            _db_ready = True
         yield con
         con.commit()
     finally:
@@ -277,9 +292,9 @@ def kv_set(key, value):
 #  aplikacji – zmiana daty pliku = wczytanie od nowa. Zła wartość = wartość domyślna + komunikat.
 # -------------------------------------------------------------
 _conf_lock = threading.RLock()
-_conf = {"mtime": None, "zapis": {}, "wyglad": {}, "devices": {}, "admin": {}, "paired": {}, "outlet": []}
-DEVICE_PREFIX = "urzadzenie "
-PAIRED_PREFIX = "sparowane "
+_conf = {"mtime": None, "storage": {}, "look": {}, "devices": {}, "admin": {}, "paired": {}, "outlet": []}
+DEVICE_PREFIX = "device "
+PAIRED_PREFIX = "paired "
 _BOOL = {"true": True, "tak": True, "1": True, "yes": True, "on": True,
          "false": False, "nie": False, "0": False, "no": False, "off": False}
 
@@ -288,7 +303,7 @@ def _check(spec, key, value, source):
     """Wartość z panelu (JSON) lub z pliku (tekst) -> poprawna wartość. Błąd -> ValueError."""
     _, allowed = spec[key]
     if allowed is None:
-        if isinstance(value, str) and source == "plik":
+        if isinstance(value, str) and source == "file":
             value = _BOOL.get(value.strip().lower(), value)
         if not isinstance(value, bool):
             raise ValueError(f"{key}: oczekiwano true/false")
@@ -303,18 +318,18 @@ def _clean_section(spec, raw, where):
     out = {}
     for key, value in raw.items():
         if key not in spec:
-            if key != "opis":
+            if key != "description":
                 log(f"global.conf [{where}]: nieznane ustawienie '{key}' – pomijam")
             continue
         try:
-            out[key] = _check(spec, key, value, "plik")
+            out[key] = _check(spec, key, value, "file")
         except ValueError as e:
             log(f"global.conf [{where}]: {e} – używam domyślnej")
     return out
 
 
 def _migrate_old_settings():
-    """Starsze wersje trzymały [zapis] w bazie (kv "settings") – przenosimy raz do global.conf."""
+    """Starsze wersje trzymały [storage] w bazie (kv "settings") – przenosimy raz do global.conf."""
     if not os.path.exists(DB_PATH):
         return {}
     with db() as con:
@@ -332,7 +347,42 @@ def parse_outlet_rule(text):
     m = _RULE_RE.match(str(text or "").strip())
     if not m or int(m[3]) > 100:
         return None
-    return {"godzina": f"{m[1]}:{m[2]}", "pozycja": int(m[3])}
+    return {"time": f"{m[1]}:{m[2]}", "position": int(m[3])}
+
+
+# Dawne polskie nazwy w global.conf (do 2026-11-21) – plik z Raspberry wczytuje się i zapisuje od razu po angielsku
+_OLD_SECTIONS = {"zapis": "storage", "wyglad": "look", "administrator": "admin", "wylotek": "outlet"}
+_OLD_PREFIXES = {"urzadzenie ": DEVICE_PREFIX, "sparowane ": PAIRED_PREFIX}
+_OLD_KEYS = {"klucz": "key", "nazwa": "name", "dodano": "added", "opis": "description"}
+_OLD_VALUES = {
+    "bialy-pylek": "white-pollen", "lekki-miodek": "light-honey", "nocna-czern": "night-black",
+    "miodna-szarosc": "honey-grey", "temperatura": "temperature", "wilgoc": "humidity", "cisnienie": "pressure",
+    "w-ulu": "inside", "na-zewnatrz": "outside", "obecna": "current", "stan": "status", "natezenie": "loudness",
+    "czestotliwosci": "frequency", "poziom": "level", "ostatnie": "last-refill",
+}
+
+
+def _migrate_polish_conf(cp):
+    """Polskie sekcje / klucze / wartości -> angielskie (w pamięci). True = coś zmieniono (plik trzeba zapisać)."""
+    changed = False
+    for old in cp.sections():
+        new = _OLD_SECTIONS.get(old)
+        for old_prefix, new_prefix in _OLD_PREFIXES.items():
+            if old.startswith(old_prefix):
+                new = new_prefix + old[len(old_prefix):]
+        items = {}
+        for key, value in cp[old].items():
+            key = _OLD_KEYS.get(key, re.sub(r"^regula(\d+)$", r"rule\1", key))
+            items[key] = _OLD_VALUES.get(value.strip(), value)
+        if new or items != dict(cp[old]):
+            target = new or old
+            cp.remove_section(old)
+            if not cp.has_section(target):
+                cp.add_section(target)
+            for key, value in items.items():
+                cp[target][key] = value
+            changed = True
+    return changed
 
 
 def _load_conf():
@@ -341,7 +391,7 @@ def _load_conf():
         try:
             mtime = os.stat(CONF_PATH).st_mtime_ns
         except FileNotFoundError:
-            _conf.update(mtime=None, zapis=_migrate_old_settings(), wyglad={}, devices={}, admin={}, paired={}, outlet=[])
+            _conf.update(mtime=None, storage=_migrate_old_settings(), look={}, devices={}, admin={}, paired={}, outlet=[])
             _save_conf()
             return _conf
         if mtime == _conf["mtime"]:
@@ -352,42 +402,46 @@ def _load_conf():
             cp.read(CONF_PATH, encoding="utf-8")
         except configparser.Error as e:
             log(f"global.conf jest uszkodzony ({e}) – używam domyślnych, plik zostawiam bez zmian")
-            _conf.update(mtime=mtime, zapis={}, wyglad={}, devices={}, admin={}, paired={}, outlet=[])
+            _conf.update(mtime=mtime, storage={}, look={}, devices={}, admin={}, paired={}, outlet=[])
             return _conf
-        wyglad = {}
-        for key, value in (cp["wyglad"].items() if cp.has_section("wyglad") else ()):
+        migrated = _migrate_polish_conf(cp)
+        look = {}
+        for key, value in (cp["look"].items() if cp.has_section("look") else ()):
             if key in LOOK_SETTINGS and _SAFE_CSS.match(value.strip()):
-                wyglad[key] = value.strip()
+                look[key] = value.strip()
             else:
-                log(f"global.conf [wyglad]: pomijam '{key}'")
+                log(f"global.conf [look]: pomijam '{key}'")
         devices = {}
         for name in cp.sections():
             if name.startswith(DEVICE_PREFIX):
                 ip = name[len(DEVICE_PREFIX):].strip()
                 devices[ip] = _clean_section(DEVICE_SETTINGS, dict(cp[name]), name)
-                if cp[name].get("opis"):
-                    devices[ip]["opis"] = cp[name]["opis"]
-        zapis = _clean_section(SERVER_SETTINGS, dict(cp["zapis"]), "zapis") if cp.has_section("zapis") else {}
-        admin = {k: v.strip() for k, v in cp["administrator"].items()
-                 if k in ("pin", "klucz") and v.strip()} if cp.has_section("administrator") else {}
+                if cp[name].get("description"):
+                    devices[ip]["description"] = cp[name]["description"]
+        storage = _clean_section(SERVER_SETTINGS, dict(cp["storage"]), "storage") if cp.has_section("storage") else {}
+        admin = {k: v.strip() for k, v in cp["admin"].items()
+                 if k in ("pin", "key") and v.strip()} if cp.has_section("admin") else {}
         paired = {}
         for name in cp.sections():
             if name.startswith(PAIRED_PREFIX):
                 sec = cp[name]
                 paired[name[len(PAIRED_PREFIX):].strip()] = {
-                    "nazwa": clean_name(sec.get("nazwa")) or "Urządzenie",
+                    "name": clean_name(sec.get("name")) or "Urządzenie",
                     "admin": _BOOL.get(sec.get("admin", "false").strip().lower(), False),
-                    "dodano": sec.get("dodano", "").strip(),
+                    "added": sec.get("added", "").strip(),
                 }
         outlet = []
-        for key, value in (cp["wylotek"].items() if cp.has_section("wylotek") else ()):
+        for key, value in (cp["outlet"].items() if cp.has_section("outlet") else ()):
             rule = parse_outlet_rule(value)
             if rule and len(outlet) < OUTLET_MAX_RULES:
                 outlet.append(rule)
             else:
-                log(f"global.conf [wylotek]: pomijam '{key} = {value}'")
-        _conf.update(mtime=mtime, zapis=zapis, wyglad=wyglad, devices=devices, admin=admin, paired=paired,
+                log(f"global.conf [outlet]: pomijam '{key} = {value}'")
+        _conf.update(mtime=mtime, storage=storage, look=look, devices=devices, admin=admin, paired=paired,
                      outlet=outlet)
+        if migrated:
+            _save_conf()
+            log("global.conf: przepisany na angielskie nazwy sekcji, kluczy i wartości")
         return _conf
 
 
@@ -398,12 +452,12 @@ def _fmt(value):
 def _save_conf():
     """Zapisuje cały plik od nowa (z opisami). Najpierw do pliku tymczasowego – prąd zgaśnie, plik zostaje cały."""
     with _conf_lock:
-        z, w = _conf["zapis"], _conf["wyglad"]
+        z, w = _conf["storage"], _conf["look"]
         lines = [
             "# BEENest – ustawienia. Plik tworzy się sam; możesz go edytować ręcznie (zmiany wczytują się same).",
             "# Zła wartość = używana jest domyślna (komunikat w konsoli). Usunięcie linijki = wartość domyślna.",
             "",
-            "[zapis]",
+            "[storage]",
             "# Wspólne dla wszystkich urządzeń (Ustawienia -> Działanie).",
             "# saveInterval: co ile minut zapisywać pomiary do historii: 1, 5, 10, 30, 60, 180",
             "# dataRetention: po ilu miesiącach usuwać najstarsze pomiary: 1, 3, 6, 12, 24",
@@ -411,20 +465,20 @@ def _save_conf():
         ]
         lines += [f"{k} = {_fmt(z.get(k, d))}" for k, (d, _) in SERVER_SETTINGS.items()]
         a = _conf["admin"]
-        lines += ["", "[administrator]",
-                  "# Tylko skróty (hash), nigdy same wartości. PIN (6 cyfr) ustawisz w konsoli: python3 app.py --ustaw-pin",
-                  "# klucz = skrót sekretu z pliku beenest.klucz na pendrivie (Klucz). Usunięcie linijki = brak PIN-u / Klucza."]
-        lines += [f"{k} = {a[k]}" for k in ("pin", "klucz") if a.get(k)]
-        lines += ["", "[wylotek]",
-                  f"# Reguły otwarcia wylotka (najwyżej {OUTLET_MAX_RULES}): regulaN = GG:MM procent (0 = zablokowany,",
+        lines += ["", "[admin]",
+                  "# Tylko skróty (hash), nigdy same wartości. PIN (6 cyfr) ustawisz w konsoli: python3 app.py --set-pin",
+                  "# key = skrót sekretu z pliku beenest.key na pendrivie (Klucz). Usunięcie linijki = brak PIN-u / Klucza."]
+        lines += [f"{k} = {a[k]}" for k in ("pin", "key") if a.get(k)]
+        lines += ["", "[outlet]",
+                  f"# Reguły otwarcia wylotka (najwyżej {OUTLET_MAX_RULES}): ruleN = GG:MM procent (0 = zablokowany,",
                   "# 100 = otwarty). O tej godzinie ul ustawia wylotek. Ustawisz je też w panelu: Stan wylotka → Sterowanie."]
-        lines += [f"regula{i} = {r['godzina']} {r['pozycja']}" for i, r in enumerate(_conf["outlet"], 1)]
+        lines += [f"rule{i} = {r['time']} {r['position']}" for i, r in enumerate(_conf["outlet"], 1)]
         lines += ["", "# ---- Sparowane urządzenia (zapamiętane). admin = stałe uprawnienia administratora.",
                   "# Usuń całą sekcję, by ul zapomniał urządzenie (będzie musiało sparować się od nowa)."]
         for did, dev in _conf["paired"].items():
-            lines += ["", f"[{PAIRED_PREFIX}{did}]", f"nazwa = {dev['nazwa']}",
-                      f"admin = {_fmt(dev['admin'])}", f"dodano = {dev.get('dodano', '')}"]
-        lines += ["", "[wyglad]",
+            lines += ["", f"[{PAIRED_PREFIX}{did}]", f"name = {dev['name']}",
+                      f"admin = {_fmt(dev['admin'])}", f"added = {dev.get('added', '')}"]
+        lines += ["", "[look]",
                   "# Stałe dla całej strony (wartości zmiennych CSS). Po zmianie odśwież stronę."]
         for k, (d, desc) in LOOK_SETTINGS.items():
             lines += [f"# {desc}", f"{k} = {w.get(k, d)}"]
@@ -435,9 +489,9 @@ def _save_conf():
                   for k, (d, a) in DEVICE_SETTINGS.items()]
         for ip, dev in _conf["devices"].items():
             lines += ["", f"[{DEVICE_PREFIX}{ip}]"]
-            if dev.get("opis"):
-                lines.append(f"opis = {dev['opis']}")
-            lines += [f"{k} = {_fmt(v)}" for k, v in dev.items() if k != "opis"]
+            if dev.get("description"):
+                lines.append(f"description = {dev['description']}")
+            lines += [f"{k} = {_fmt(v)}" for k, v in dev.items() if k != "description"]
         os.makedirs(os.path.dirname(CONF_PATH), exist_ok=True)
         tmp = CONF_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -447,7 +501,7 @@ def _save_conf():
 
 
 def get_server_settings():
-    z = _load_conf()["zapis"]
+    z = _load_conf()["storage"]
     return {k: z.get(k, default) for k, (default, _) in SERVER_SETTINGS.items()}
 
 
@@ -462,7 +516,7 @@ def known_device(ip):
 
 def set_settings(changes, ip, about=""):
     """
-    Zmiany z panelu. Klucze [zapis] trafiają do wspólnej sekcji, reszta do sekcji tego urządzenia.
+    Zmiany z panelu. Klucze [storage] trafiają do wspólnej sekcji, reszta do sekcji tego urządzenia.
     Sprawdza wszystko, zanim cokolwiek zapisze. Błąd -> ValueError.
     """
     if not isinstance(changes, dict):
@@ -477,9 +531,9 @@ def set_settings(changes, ip, about=""):
             raise ValueError(f"Nieznane ustawienie: {key}")
     with _conf_lock:
         conf = _load_conf()
-        conf["zapis"].update(server)
+        conf["storage"].update(server)
         if ip is not None and (device or ip not in conf["devices"]):
-            dev = conf["devices"].setdefault(ip, {"opis": about} if about else {})
+            dev = conf["devices"].setdefault(ip, {"description": about} if about else {})
             for key, value in device.items():
                 if value == DEVICE_SETTINGS[key][0]:
                     dev.pop(key, None)          # domyślna = nie zapisujemy (zmiana domyślnych dotrze do urządzenia)
@@ -488,16 +542,9 @@ def set_settings(changes, ip, about=""):
         _save_conf()
 
 
-def set_server_settings(changes):
-    """Tylko [zapis] (zostawione dla zgodności i testów)."""
-    if isinstance(changes, dict) and any(k not in SERVER_SETTINGS for k in changes):
-        raise ValueError("Nieznane ustawienie: " + next(k for k in changes if k not in SERVER_SETTINGS))
-    set_settings(changes, None)
-
-
 def look_css():
-    """[wyglad] -> CSS wstawiany do strony zaraz po style.css (nadpisuje wartości z pliku CSS)."""
-    w = _load_conf()["wyglad"]
+    """[look] -> CSS wstawiany do strony zaraz po style.css (nadpisuje wartości z pliku CSS)."""
+    w = _load_conf()["look"]
     root = "".join(f"--{k}:{w.get(k, d)};" for k, (d, _) in LOOK_SETTINGS.items() if k not in _LOOK_BODY)
     body = "".join(f"--{k}:{w.get(k, d)};" for k, (d, _) in LOOK_SETTINGS.items() if k in _LOOK_BODY)
     # "Ogranicz ruch" w systemie nadal wyłącza animacje
@@ -506,8 +553,15 @@ def look_css():
 
 
 def device_label(req):
+    """Opis urządzenia z User-Agent (to, co w nawiasie, np. „Linux; Android 15; Pixel 9 Pro”)."""
     m = re.search(r"\(([^)]*)\)", req.headers.get("User-Agent", ""))
     return re.sub(r"[\r\n\[\]]", " ", m.group(1))[:60] if m else ""
+
+
+def body():
+    """Treść żądania JSON jako słownik (pusty, gdy brak albo to nie obiekt)."""
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
 
 
 def clean_name(text):
@@ -572,14 +626,18 @@ def disk_info():
 # -------------------------------------------------------------
 #  Wartości wyliczane (min/max z 24 h, stan rodziny, napełnienie)
 # -------------------------------------------------------------
-def day_range(key, current, now):
-    """Min i max z ostatnich 24 h (zapisane próbki + bieżący odczyt)."""
+def day_ranges(raw, now):
+    """Min i max z ostatnich 24 h dla DAY_RANGES (zapisane próbki + bieżący odczyt) – jedno zapytanie do bazy."""
+    marks = ",".join("?" * len(DAY_RANGES))
     with db() as con:
-        lo, hi = con.execute(
-            "SELECT MIN(value), MAX(value) FROM readings WHERE key = ? AND ts >= ?",
-            (key, int(now) - 86400)).fetchone()
-    values = [v for v in (lo, hi, current) if v is not None]
-    return (min(values), max(values)) if values else (None, None)
+        stored = {key: (lo, hi) for key, lo, hi in con.execute(
+            f"SELECT key, MIN(value), MAX(value) FROM readings WHERE key IN ({marks}) AND ts >= ? GROUP BY key",
+            (*DAY_RANGES, int(now) - 86400))}
+    out = {}
+    for key, prefix in DAY_RANGES.items():
+        values = [v for v in (*stored.get(key, ()), raw[key]) if v is not None]
+        out[prefix + "_min"], out[prefix + "_max"] = (min(values), max(values)) if values else (None, None)
+    return out
 
 
 def wellbeing_status(frequency, sound):
@@ -607,7 +665,14 @@ def outlet_status(position):
     return "W ruchu"
 
 
-_state = {"feeder_low": None, "last_refill": 0.0, "last_save": None}
+_state = {"feeder_low": None, "last_refill": 0.0, "last_save": None, "f_last": ...}   # ... = jeszcze nie z bazy
+
+
+def last_refill_time():
+    """Czas ostatniego napełnienia (kv "f_last"); z bazy tylko raz, potem z pamięci."""
+    if _state["f_last"] is ...:
+        _state["f_last"] = kv_get("f_last")
+    return _state["f_last"]
 
 
 def detect_refill(level, now):
@@ -624,14 +689,17 @@ def detect_refill(level, now):
         _state["feeder_low"] = level
         if now - _state["last_refill"] >= REFILL_COOLDOWN:
             _state["last_refill"] = now
+            _state["f_last"] = int(now)
             kv_set("f_last", int(now))
             threading.Thread(target=ring_buzzer, daemon=True).start()
-            
+
+
 def ring_buzzer():
     try:
         buzzer.alarm()
     except Exception as e:
         log(f"buzzer: {e}")
+
 
 def move_outlet(percent, who):
     """Ustawia wylotek (serwo) i od razu poprawia ostatni odczyt, żeby strona nie czekała na kolejną próbkę."""
@@ -644,17 +712,17 @@ def move_outlet(percent, who):
 
 
 def run_outlet_rules(now):
-    """Reguły z [wylotek]: o podanej godzinie (co do minuty) ustawia wylotek. Każda minuta tylko raz."""
+    """Reguły z [outlet]: o podanej godzinie (co do minuty) ustawia wylotek. Każda minuta tylko raz."""
     minute = time.strftime("%H:%M", time.localtime(now))
     if minute == _state.get("outlet_minute"):
         return
     _state["outlet_minute"] = minute
     for rule in _load_conf()["outlet"]:
-        if rule["godzina"] == minute:
+        if rule["time"] == minute:
             try:
-                move_outlet(rule["pozycja"], f"reguła {minute}")
+                move_outlet(rule["position"], f"reguła {minute}")
             except Exception as e:
-                track("wylotek", e)
+                track("outlet", e)
 
 
 def save_history(raw, settings, now):
@@ -699,12 +767,11 @@ def wellbeing_bands():
 
 def build_payload(raw, now):
     p = dict(raw)
-    for key, prefix in DAY_RANGES.items():
-        p[prefix + "_min"], p[prefix + "_max"] = day_range(key, raw[key], now)
+    p.update(day_ranges(raw, now))
     p["w_status"] = wellbeing_status(raw["w_frequency"], raw["w_sound"])
     p["o_status"] = outlet_status(raw["o_position"])
     p["w_updated"] = int(now)                 # sekundy od 1970 – przeglądarka sformatuje po swojemu
-    p["f_last"] = kv_get("f_last")            # None, dopóki nie wykryto pierwszego napełnienia
+    p["f_last"] = last_refill_time()          # None, dopóki nie wykryto pierwszego napełnienia
     return p
 
 
@@ -875,8 +942,8 @@ def note_new_client():
     ip = request.remote_addr
     if ip not in _seen_clients:
         _seen_clients.add(ip)
-        m = re.search(r"\(([^)]*)\)", request.headers.get("User-Agent", ""))
-        log(f"pierwsze połączenie z {ip}" + (f" ({m.group(1)[:60]})" if m else ""))
+        label = device_label(request)
+        log(f"pierwsze połączenie z {ip}" + (f" ({label})" if label else ""))
 
 
 # -------------------------------------------------------------
@@ -889,17 +956,17 @@ def run_system_command(args, timeout=60):
 
 
 # ---- Logo startowe w kolorach motywu wyświetlacza: (tło, „BEE”, „NEST”) – zmierzone z CSS panelu na wyświetlaczu.
-# Serwer zapisuje data/logo.png (+ logo.kolor = tło, logo.motyw = wariant). Tło kiosku (pi/tlo.sh) bierze je od razu,
-# Plymouth po przebudowie initramfs – robi to usługa beenest-logo (root, pi/instaluj.sh), gdy logo.png się zmieni.
+# Serwer zapisuje data/logo.png (+ logo.color = tło, logo.theme = wariant). Tło kiosku (pi/background.sh) bierze je od razu,
+# Plymouth po przebudowie initramfs – robi to usługa beenest-logo (root, pi/install.sh), gdy logo.png się zmieni.
 BOOT_LOGO_COLORS = {
-    "bialy-pylek/normal": ("#FFFFFF", "#0F0F10", "#FF8A00"),
-    "bialy-pylek/high": ("#FFFFFF", "#0F0F10", "#000000"),
-    "lekki-miodek/normal": ("#FFF8E7", "#4A2F1A", "#FF9E00"),
-    "lekki-miodek/high": ("#FFF2E0", "#1A1A1A", "#E65100"),
-    "nocna-czern/normal": ("#000000", "#FFFFFF", "#FF8A00"),
-    "nocna-czern/high": ("#000000", "#FFFFFF", "#FFFFFF"),
-    "miodna-szarosc/normal": ("#2E2410", "#FFF3DC", "#FFB800"),
-    "miodna-szarosc/high": ("#000000", "#FFFFFF", "#FFC107"),
+    "white-pollen/normal": ("#FFFFFF", "#0F0F10", "#FF8A00"),
+    "white-pollen/high": ("#FFFFFF", "#0F0F10", "#000000"),
+    "light-honey/normal": ("#FFF8E7", "#4A2F1A", "#FF9E00"),
+    "light-honey/high": ("#FFF2E0", "#1A1A1A", "#E65100"),
+    "night-black/normal": ("#000000", "#FFFFFF", "#FF8A00"),
+    "night-black/high": ("#000000", "#FFFFFF", "#FFFFFF"),
+    "honey-grey/normal": ("#2E2410", "#FFF3DC", "#FFB800"),
+    "honey-grey/high": ("#000000", "#FFFFFF", "#FFC107"),
 }
 _logo_lock = threading.Lock()
 
@@ -913,16 +980,16 @@ def update_boot_logo():
         key = f"{dev['theme']}/{'high' if dev['highContrast'] else 'normal'}"
         data = os.path.join(ROOT, "data")
         try:
-            with open(os.path.join(data, "logo.motyw"), encoding="utf-8") as f:
+            with open(os.path.join(data, "logo.theme"), encoding="utf-8") as f:
                 if f.read().strip() == key and os.path.exists(os.path.join(data, "logo.png")):
                     return
         except OSError:
             pass
         bg, bee, nest = BOOT_LOGO_COLORS[key]
         try:
-            subprocess.run([sys.executable, os.path.join(ROOT, "pi", "logo.py"), os.path.join(ROOT, "pi", "logo-startowe.png"),
+            subprocess.run([sys.executable, os.path.join(ROOT, "pi", "logo.py"), os.path.join(ROOT, "pi", "boot-logo.png"),
                             os.path.join(data, "logo.png.tmp"), bg, bee, nest], check=True, capture_output=True, timeout=120)
-            for name, text in (("logo.kolor", bg), ("logo.motyw", key)):
+            for name, text in (("logo.color", bg), ("logo.theme", key)):
                 with open(os.path.join(data, name), "w", encoding="utf-8") as f:
                     f.write(text + "\n")
             os.replace(os.path.join(data, "logo.png.tmp"), os.path.join(data, "logo.png"))
@@ -931,6 +998,7 @@ def update_boot_logo():
             log(f"logo startowe: błąd: {e!r}")
 
 
+@functools.lru_cache(maxsize=1)
 def on_raspberry():
     try:
         with open("/proc/device-tree/model", encoding="ascii", errors="replace") as f:
@@ -980,16 +1048,16 @@ def json_only():
 
 # -------------------------------------------------------------
 #  Zabezpieczenia
-#  Dwa poziomy: "uzytkownik" (podgląd) i "admin". Kto pyta:
+#  Dwa poziomy: "user" (podgląd) i "admin". Kto pyta:
 #    - wyświetlacz przy ulu (przeglądarka na Raspberry, 127.0.0.1): administrator, gdy wpięty jest Klucz
-#      (pendrive z plikiem beenest.klucz) albo przez ADMIN_IDLE s od ostatniego dotyku po wpisaniu PIN-u;
+#      (pendrive z plikiem beenest.key) albo przez ADMIN_IDLE s od ostatniego dotyku po wpisaniu PIN-u;
 #    - telefon / komputer: musi być sparowany na wyświetlaczu (kod QR albo 6 cyfr). Dostaje ciasteczko
 #      z samym identyfikatorem; rola (admin / użytkownik) jest stała, zmienia ją administrator na liście.
-#      Zapamiętane urządzenia są w global.conf [sparowane <id>], niezapamiętane tylko w pamięci.
+#      Zapamiętane urządzenia są w global.conf [paired <id>], niezapamiętane tylko w pamięci.
 #    - niesparowany telefon widzi tylko ekran parowania (reszta API odpowiada 401).
 #  5 błędnych PIN-ów = blokada całego ula na LOCK_TIME s; zdejmuje ją telefon administratora albo Klucz.
 # -------------------------------------------------------------
-ADMIN, USER, UNPAIRED = "admin", "uzytkownik", "niesparowane"
+ADMIN, USER, UNPAIRED = "admin", "user", "unpaired"
 _sec_lock = threading.RLock()
 _sec = {
     "admin_until": 0.0,     # wyświetlacz odblokowany PIN-em do (czas)
@@ -1001,7 +1069,8 @@ _sec = {
     "seen": {},             # zapamiętane urządzenia: id -> ostatnie zapytanie
     "dup": None,            # duplikowanie Klucza: {secret, until}
 }
-_usb = {"sticks": [], "key_path": None, "event": 0, "event_type": None, "tried": set(), "busy": False}
+_usb = {"sticks": [], "key_path": None, "event": 0, "event_type": None, "tried": set(), "busy": False,
+        "blocks": None}   # blocks: dyski sd* z ostatniego pełnego sprawdzenia (usb_automount)
 
 
 def is_display():
@@ -1021,7 +1090,7 @@ def pin_hash():
 
 
 def set_admin_secret(name, value):
-    """Zapisuje (albo usuwa, gdy value=None) skrót PIN-u / Klucza w global.conf [administrator]."""
+    """Zapisuje (albo usuwa, gdy value=None) skrót PIN-u / Klucza w global.conf [admin]."""
     with _conf_lock:
         conf = _load_conf()
         if value:
@@ -1039,36 +1108,38 @@ def who_is_asking():
     """Kim jest ten, kto pyta: {poziom, wyswietlacz, przez, id, nazwa, zapamietane}."""
     now = time.time()
     if NO_SECURITY:
-        return {"poziom": ADMIN, "wyswietlacz": is_display(), "przez": "bez-zabezpieczen", "id": None}
+        return {"level": ADMIN, "display": is_display(), "via": "no-security", "id": None}
     if is_display():
-        via = "klucz" if key_present() else ("pin" if now < _sec["admin_until"] else None)
-        return {"poziom": ADMIN if via else USER, "wyswietlacz": True, "przez": via, "id": None}
-    did = session.get("urzadzenie")
+        via = "key" if key_present() else ("pin" if now < _sec["admin_until"] else None)
+        return {"level": ADMIN if via else USER, "display": True, "via": via, "id": None}
+    did = session.get("device")
+    if not did and session.get("urzadzenie"):         # ciasteczko sprzed 2026-11-21 (polska nazwa klucza)
+        did = session["device"] = session.pop("urzadzenie")
     if did:
         with _sec_lock:
             dev = _load_conf()["paired"].get(did)
             if dev:
                 _sec["seen"][did] = now
-                return {"poziom": ADMIN if dev["admin"] else USER, "wyswietlacz": False, "przez": "telefon",
-                        "id": did, "nazwa": dev["nazwa"], "zapamietane": True}
+                return {"level": ADMIN if dev["admin"] else USER, "display": False, "via": "phone",
+                        "id": did, "name": dev["name"], "remembered": True}
             tmp = _sec["temp"].get(did)
             if tmp and now - tmp["last"] <= TEMP_DEVICE_TIME:
                 tmp["last"] = now
-                return {"poziom": ADMIN if tmp["admin"] else USER, "wyswietlacz": False, "przez": "telefon",
-                        "id": did, "nazwa": tmp["nazwa"], "zapamietane": False}
+                return {"level": ADMIN if tmp["admin"] else USER, "display": False, "via": "phone",
+                        "id": did, "name": tmp["name"], "remembered": False}
             _sec["temp"].pop(did, None)
-    return {"poziom": UNPAIRED, "wyswietlacz": False, "przez": None, "id": None}
+    return {"level": UNPAIRED, "display": False, "via": None, "id": None}
 
 
 def need(admin=True, display=False, phone=False):
     """None = wolno; inaczej gotowa odpowiedź z błędem. Używane jak json_only()."""
     w = g.who
-    if display and not w["wyswietlacz"]:
+    if display and not w["display"]:
         return jsonify(error="To działa tylko na wyświetlaczu ula"), 403
-    if phone and w["wyswietlacz"]:
+    if phone and w["display"]:
         return jsonify(error="To działa tylko na sparowanym telefonie"), 403
-    if admin and w["poziom"] != ADMIN:
-        return jsonify(error="Brak uprawnień administratora", brak_uprawnien=True), 403
+    if admin and w["level"] != ADMIN:
+        return jsonify(error="Brak uprawnień administratora", forbidden=True), 403
     return None
 
 
@@ -1076,11 +1147,11 @@ def check_pin(pin):
     """None = PIN poprawny; inaczej odpowiedź z błędem. Liczy błędy i włącza blokadę."""
     with _sec_lock:
         if lock_left():
-            return jsonify(error="Panel jest zablokowany", blokada=lock_left()), 423
+            return jsonify(error="Panel jest zablokowany", lockout=lock_left()), 423
         stored = pin_hash()
         if not stored:
             return jsonify(error="PIN administratora nie jest ustawiony. Ustawisz go w konsoli Raspberry Pi: "
-                                 "python3 app.py --ustaw-pin"), 409
+                                 "python3 app.py --set-pin"), 409
         if valid_pin(pin) and check_password_hash(stored, pin):
             _sec["fails"] = 0
             return None
@@ -1090,11 +1161,11 @@ def check_pin(pin):
             _sec["locked_until"] = time.time() + LOCK_TIME
             _sec["admin_until"] = 0.0              # blokada od razu zahasłowuje panel
             log(f"{LOCK_AFTER} błędnych PIN-ów pod rząd – panel zablokowany na {LOCK_TIME // 60} minut")
-            return jsonify(error="Panel zablokowany", blokada=LOCK_TIME), 423
-        return jsonify(error="Błędny PIN", pozostalo=LOCK_AFTER - _sec["fails"]), 403
+            return jsonify(error="Panel zablokowany", lockout=LOCK_TIME), 423
+        return jsonify(error="Błędny PIN", remaining=LOCK_AFTER - _sec["fails"]), 403
 
 
-# ---- Klucz: pendrive z plikiem beenest.klucz (losowy sekret). W global.conf jest tylko jego skrót SHA-256.
+# ---- Klucz: pendrive z plikiem beenest.key (losowy sekret). W global.conf jest tylko jego skrót SHA-256.
 def usb_mounts():
     """Zamontowane pendrive'y. BEENEST_USB=<katalog> – do testów: każdy podkatalog udaje jeden pendrive."""
     if os.environ.get("BEENEST_USB"):
@@ -1111,15 +1182,17 @@ def usb_mounts():
 
 
 def read_key_file(mount):
-    try:
-        with open(os.path.join(mount, KEY_FILE), encoding="ascii") as f:
-            return f.read(200).strip() or None
-    except (OSError, UnicodeDecodeError):
-        return None
+    for name in (KEY_FILE, LEGACY_KEY_FILE):
+        try:
+            with open(os.path.join(mount, name), encoding="ascii") as f:
+                return f.read(200).strip() or None
+        except (OSError, UnicodeDecodeError):
+            continue
+    return None
 
 
 def key_matches(secret):
-    stored = _load_conf()["admin"].get("klucz")
+    stored = _load_conf()["admin"].get("key")
     return bool(secret and stored) and hmac.compare_digest(hashlib.sha256(secret.encode()).hexdigest(), stored)
 
 
@@ -1129,22 +1202,22 @@ def scan_usb(quiet=False):
     sticks, key = [], None
     for mount in usb_mounts():
         secret = read_key_file(mount)
-        state = None if secret is None else ("wazny" if key_matches(secret) else "inny")
-        if state == "wazny" and key is None:
+        state = None if secret is None else ("valid" if key_matches(secret) else "other")
+        if state == "valid" and key is None:
             key = mount
         try:
             size = shutil.disk_usage(mount).total
         except OSError:
             size = None
-        sticks.append({"sciezka": mount, "nazwa": os.path.basename(mount.rstrip("\\/")) or mount,
-                       "rozmiar": size, "klucz": state})
+        sticks.append({"path": mount, "name": os.path.basename(mount.rstrip("\\/")) or mount,
+                       "size": size, "key": state})
     with _sec_lock:
         was = key_present()
         _usb["sticks"], _usb["key_path"] = sticks, key
         if (key is not None) == was or quiet:
             return
         _usb["event"] += 1
-        _usb["event_type"] = "podlaczony" if key else "odlaczony"
+        _usb["event_type"] = "inserted" if key else "removed"
         if key:
             _sec["locked_until"], _sec["fails"] = 0.0, 0     # Klucz zdejmuje blokadę
             log("Klucz wpięty – wyświetlacz ma uprawnienia administratora")
@@ -1157,13 +1230,17 @@ def usb_automount():
     """
     Raspberry: sesja kiosku nie ma menedżera plików, który sam montowałby pendrive'y (/media było puste),
     więc montuje je serwer przez udisksctl → /media/<użytkownik>/<nazwa>. Prawo do tego daje usłudze reguła
-    polkit z pi/instaluj.sh. Tylko dyski USB i tylko partycje z systemem plików (np. FAT, exFAT, NTFS).
+    polkit z pi/install.sh. Tylko dyski USB i tylko partycje z systemem plików (np. FAT, exFAT, NTFS).
     Każdą partycję próbujemy raz – do wyjęcia pendrive'a. Po wyjęciu udisks sam sprząta punkt montowania.
     """
     if sys.platform != "linux" or os.environ.get("BEENEST_USB") or not shutil.which("udisksctl"):
         return
-    if not glob.glob("/sys/class/block/sd*"):           # nic nie jest wpięte – bez uruchamiania lsblk
+    names = tuple(sorted(glob.glob("/sys/class/block/sd*")))
+    if not names:                                       # nic nie jest wpięte – bez uruchamiania lsblk
         _usb["tried"].clear()
+        _usb["blocks"] = names
+        return
+    if names == _usb["blocks"]:                         # te same dyski co przy ostatnim pełnym sprawdzeniu
         return
     out = subprocess.run(["lsblk", "-J", "-l", "-p", "-o", "PATH,PKNAME,TRAN,FSTYPE,MOUNTPOINT"],
                          capture_output=True, text=True, timeout=5).stdout
@@ -1173,6 +1250,9 @@ def usb_automount():
     todo = [d["path"] for d in usb
             if d.get("fstype") and not d.get("mountpoint") and d["path"] not in _usb["tried"]]
     _usb["tried"] &= {d["path"] for d in usb}           # wyjęty pendrive – przy następnym wpięciu znów próbujemy
+    # Lista zapamiętana dopiero, gdy udev zdążył opisać systemy plików (tuż po wpięciu FSTYPE bywa jeszcze pusty)
+    parts = [d for d in usb if d.get("pkname") in disks] or [d for d in usb if d["path"] in disks]
+    _usb["blocks"] = names if all(d.get("fstype") for d in parts) else None
     for path in todo:
         _usb["tried"].add(path)
         r = subprocess.run(["udisksctl", "mount", "-b", path, "--no-user-interaction"],
@@ -1192,7 +1272,7 @@ def safe_eject(mount):
     """
     „Bezpieczne usuwanie” po zapisie Klucza: odmontowanie i wyłączenie pendrive'a (udisksctl power-off).
     Powód (2026-11-21): tani pendrive potwierdził zapis, ale trzymał dane we własnej pamięci podręcznej –
-    wyjęty 6 s później miał plik beenest.klucz o dobrym rozmiarze, wypełniony bajtami 0xFF. Jądro
+    wyjęty 6 s później miał plik beenest.key o dobrym rozmiarze, wypełniony bajtami 0xFF. Jądro
     zakłada „write through” i nie każe mu jej opróżnić; dopiero wyłączenie go do tego zmusza.
     True = pendrive wyłączony (można go wyjąć). False = nie wyszło – zostaje zamontowany, trzeba chwilę odczekać.
     """
@@ -1223,6 +1303,7 @@ def safe_eject(mount):
         if not ok:
             log(f"pendrive {dev}: nie da się wyłączyć ({msg[0]}) – montuję ponownie")
             _usb["tried"].discard(dev)   # usb_automount zamontuje go znowu
+            _usb["blocks"] = None
             return False
         log(f"pendrive {dev}: bezpiecznie odłączony")
         return True
@@ -1238,7 +1319,7 @@ def usb_loop():
         try:
             usb_automount()
         except Exception as e:
-            track("usb-montowanie", e)
+            track("usb-mount", e)
         try:
             scan_usb()
             track("usb")
@@ -1260,7 +1341,7 @@ def write_key(mount, secret):
 
 
 def find_stick(name):
-    return next((s for s in _usb["sticks"] if s["nazwa"] == name), None)
+    return next((s for s in _usb["sticks"] if s["name"] == name), None)
 
 
 # ---- Parowanie
@@ -1276,7 +1357,7 @@ def hotspot_wifi():
         except Exception as e:
             return None, f"Nie udało się odczytać połączenia {HOTSPOT_CONNECTION}: {error_text(e)}"
         values.append(out.strip())
-    return {"ssid": values[0], "haslo": values[1]}, None
+    return {"ssid": values[0], "password": values[1]}, None
 
 
 def pairing_address():
@@ -1294,34 +1375,34 @@ def pairing_address():
 def security_state(w):
     """Stan zabezpieczeń dla strony (wklejany do strony i odpytywany co sekundę / dwie)."""
     now = time.time()
-    s = {"poziom": w["poziom"], "wyswietlacz": w["wyswietlacz"], "przez": w["przez"],
-         "bez_zabezpieczen": NO_SECURITY, "dlugosc_pinu": PIN_LENGTH}
-    if w["poziom"] == UNPAIRED:
+    s = {"level": w["level"], "display": w["display"], "via": w["via"],
+         "no_security": NO_SECURITY, "pin_length": PIN_LENGTH}
+    if w["level"] == UNPAIRED:
         return s
-    s["blokada"] = round(lock_left(), 2)
-    s["pin_ustawiony"] = bool(pin_hash())
+    s["lockout"] = round(lock_left(), 2)
+    s["pin_set"] = bool(pin_hash())
     code, req = _sec["code"], _sec["request"]
-    pairing = {"kod": round(code["until"] - now) if code and now < code["until"] else 0,
-               "prosba": {"id": req["id"], "nazwa": req["nazwa"]}
+    pairing = {"code": round(code["until"] - now) if code and now < code["until"] else 0,
+               "request": {"id": req["id"], "name": req["name"]}
                if req and req["decision"] is None and now < req["until"] else None,
                # jak skończyła się ostatnia prośba – pozostałe urządzenia zamykają okno z właściwym komunikatem
-               "rozpatrzona": {"id": done["id"], "zgoda": done["zgoda"]}
+               "decided": {"id": done["id"], "approved": done["approved"]}
                if (done := _sec.get("decided")) and now < done["until"] else None}
-    if w["wyswietlacz"]:
+    if w["display"]:
         conf = _load_conf()["admin"]
         dup = _sec["dup"]
         s.update(
             pairing,
-            admin_do=round(max(0.0, _sec["admin_until"] - now)) if w["przez"] == "pin" else 0,
-            klucz={"ustawiony": bool(conf.get("klucz")), "wpiety": key_present(),
-                   "zdarzenie": _usb["event"], "typ": _usb["event_type"]},
-            usb=[{"nazwa": x["nazwa"], "rozmiar": x["rozmiar"], "klucz": x["klucz"]} for x in _usb["sticks"]],
-            duplikowanie=bool(dup and now < dup["until"]),
-            uspij=_screen["zadanie"],          # zmiana licznika = telefon kazał zgasić ekran
+            admin_left=round(max(0.0, _sec["admin_until"] - now)) if w["via"] == "pin" else 0,
+            key={"set": bool(conf.get("key")), "inserted": key_present(),
+                   "event": _usb["event"], "type": _usb["event_type"]},
+            usb=[{"name": x["name"], "size": x["size"], "key": x["key"]} for x in _usb["sticks"]],
+            duplicating=bool(dup and now < dup["until"]),
+            sleep_request=_screen["requests"],          # zmiana licznika = telefon kazał zgasić ekran
         )
     else:
-        s["urzadzenie"] = {"nazwa": w.get("nazwa"), "zapamietane": w.get("zapamietane", False)}
-        if w["poziom"] == ADMIN:               # telefon administratora też może parować nowe urządzenia
+        s["device"] = {"name": w.get("name"), "remembered": w.get("remembered", False)}
+        if w["level"] == ADMIN:               # telefon administratora też może parować nowe urządzenia
             s.update(pairing)
     return s
 
@@ -1354,8 +1435,8 @@ _redirected = set()
 @app.before_request
 def guard():
     g.who = who_is_asking()
-    if g.who["poziom"] == UNPAIRED and request.endpoint not in OPEN_ENDPOINTS:
-        return jsonify(error="To urządzenie nie jest sparowane z ulem", niesparowane=True), 401
+    if g.who["level"] == UNPAIRED and request.endpoint not in OPEN_ENDPOINTS:
+        return jsonify(error="To urządzenie nie jest sparowane z ulem", unpaired=True), 401
 
 
 # -------------------------------------------------------------
@@ -1367,12 +1448,12 @@ def index():
     ip = request.remote_addr
     return render_template("main.html", look_css=look_css(), auth=security_state(g.who),
                            device={"settings": {**get_server_settings(), **get_device_settings(ip)},
-                                   "known": known_device(ip), "nazwa_sieciowa": network_name(ip)})
+                                   "known": known_device(ip), "network_name": network_name(ip)})
 
 
 # -------------------------------------------------------------
 #  Testy łączności telefonów (hotspot bez internetu)
-#  Na hotspocie dnsmasq kieruje każdą nazwę na Raspberry (pi/instaluj.sh), więc telefon pytający
+#  Na hotspocie dnsmasq kieruje każdą nazwę na Raspberry (pi/install.sh), więc telefon pytający
 #  „czy jest internet?” trafia tutaj i dostaje odpowiedź, jakiej się spodziewa.
 #  Sprawdzenia przez HTTPS (Android robi je równolegle) nie da się podrobić bez certyfikatu Google.
 # -------------------------------------------------------------
@@ -1462,7 +1543,7 @@ def api_settings():
         if (bad := json_only()):
             return bad
         changes = request.get_json(silent=True)
-        # Zakładkę Działanie ([zapis] + alarm) zmienia tylko administrator; wygląd i karty – każdy dla siebie.
+        # Zakładkę Działanie ([storage] + alarm) zmienia tylko administrator; wygląd i karty – każdy dla siebie.
         if (isinstance(changes, dict) and any(k in SERVER_SETTINGS or k in ADMIN_DEVICE_SETTINGS for k in changes)
                 and (bad := need())):
             return bad
@@ -1470,7 +1551,7 @@ def api_settings():
             set_settings(changes, request.remote_addr, device_label(request))
         except ValueError as e:
             return jsonify(error=str(e)), 400
-        if g.who["wyswietlacz"] and ("theme" in changes or "highContrast" in changes):
+        if g.who["display"] and ("theme" in changes or "highContrast" in changes):
             threading.Thread(target=update_boot_logo, daemon=True).start()
     return jsonify({**get_server_settings(), **get_device_settings(request.remote_addr)})
 
@@ -1498,58 +1579,58 @@ def api_shutdown():
 
 
 # ---- Uśpienie ekranu (tylko wyświetlacz; animację i zasłonę rysuje strona, tu samo zasilanie obrazu)
-_screen = {"zadanie": 0}     # licznik próśb telefonów o zgaszenie ekranu ula (odczytuje wyświetlacz)
+_screen = {"requests": 0}     # licznik próśb telefonów o zgaszenie ekranu ula (odczytuje wyświetlacz)
 
 
-@app.post("/api/ekran/uspij")
+@app.post("/api/screen/sleep")
 def api_screen_sleep():
     """Wyświetlacz: gasi obraz. Telefon (każdy sparowany): prosi wyświetlacz, żeby się uśpił – ten przy
     najbliższym odczycie stanu (co sekundę) pokazuje animację i sam gasi obraz."""
     if (bad := json_only()):
         return bad
-    if not g.who["wyswietlacz"]:
-        _screen["zadanie"] += 1
-        log(f"{g.who.get('nazwa') or request.remote_addr}: zgaszenie ekranu ula")
-        return jsonify(ok=True, zdalnie=True)
+    if not g.who["display"]:
+        _screen["requests"] += 1
+        log(f"{g.who.get('name') or request.remote_addr}: zgaszenie ekranu ula")
+        return jsonify(ok=True, remote=True)
     _sec["admin_until"] = 0.0      # zgaszony ekran = zahasłowany panel (jak „Zahasłuj Panel”; wpięty Klucz nadal działa)
-    return jsonify(ok=True, wylaczony=screen_power(False))
+    return jsonify(ok=True, screen_off=screen_power(False))
 
 
-@app.post("/api/ekran/obudz")
+@app.post("/api/screen/wake")
 def api_screen_wake():
     if (bad := json_only() or need(admin=False, display=True)):
         return bad
-    return jsonify(ok=True, wlaczony=screen_power(True))
+    return jsonify(ok=True, screen_on=screen_power(True))
 
 
-@app.post("/api/wylotek")
+@app.post("/api/outlet")
 def api_outlet_move():
     """Stan wylotka → przyciski i suwak (na żywo, strona wysyła kolejne pozycje w trakcie przesuwania)."""
     if (bad := json_only() or need()):
         return bad
-    value = to_number((request.get_json(silent=True) or {}).get("pozycja"))
+    value = to_number(body().get("position"))
     if value is None or not 0 <= value <= 100:
         return jsonify(error="Pozycja wylotka musi być liczbą od 0 do 100"), 400
     try:
         move_outlet(round(value), None)
     except OSError as e:
         return jsonify(error=f"Nie udało się poruszyć wylotkiem: {e.strerror or e}"), 500
-    return jsonify(ok=True, pozycja=round(value))
+    return jsonify(ok=True, position=round(value))
 
 
-@app.route("/api/wylotek/reguly", methods=["GET", "POST"])
+@app.route("/api/outlet/rules", methods=["GET", "POST"])
 def api_outlet_rules():
     """Reguły otwarcia: lista {godzina: "GG:MM", pozycja: 0–100}, najwyżej OUTLET_MAX_RULES. Zmiana: administrator."""
     if request.method == "GET":
-        return jsonify(reguly=_load_conf()["outlet"], najwiecej=OUTLET_MAX_RULES)
+        return jsonify(rules=_load_conf()["outlet"], max=OUTLET_MAX_RULES)
     if (bad := json_only() or need()):
         return bad
-    raw = (request.get_json(silent=True) or {}).get("reguly")
+    raw = body().get("rules")
     if not isinstance(raw, list) or len(raw) > OUTLET_MAX_RULES:
         return jsonify(error=f"Najwyżej {OUTLET_MAX_RULES} reguł"), 400
     rules = []
     for item in raw:
-        rule = isinstance(item, dict) and parse_outlet_rule(f"{item.get('godzina')} {item.get('pozycja')}")
+        rule = isinstance(item, dict) and parse_outlet_rule(f"{item.get('time')} {item.get('position')}")
         if not rule:
             return jsonify(error="Zła reguła – godzina GG:MM i procent od 0 do 100"), 400
         rules.append(rule)
@@ -1557,7 +1638,7 @@ def api_outlet_rules():
         _load_conf()["outlet"] = rules
         _save_conf()
     log(f"wylotek: reguły otwarcia ({len(rules)}) zapisane")
-    return jsonify(ok=True, reguly=rules)
+    return jsonify(ok=True, rules=rules)
 
 
 @app.post("/api/history/clear")
@@ -1588,7 +1669,7 @@ def api_update():
     """
     if (bad := json_only() or need()):
         return bad
-    reboot = (request.get_json(silent=True) or {}).get("reboot") is True
+    reboot = body().get("reboot") is True
     try:
         before = run_system_command(["git", "rev-parse", "HEAD"]).stdout.strip()
         run_system_command(["git", "pull", "--ff-only"], timeout=120)
@@ -1608,23 +1689,23 @@ def api_update():
 
 
 # ---- Zabezpieczenia: stan, PIN, blokada
-@app.route("/api/zabezpieczenia/stan")
+@app.route("/api/security/state")
 def api_security_state():
     return jsonify(security_state(g.who))
 
 
-@app.post("/api/zabezpieczenia/pin")
+@app.post("/api/security/pin")
 def api_pin_unlock():
     """Wyświetlacz: PIN administratora odblokowuje panel na ADMIN_IDLE s od ostatniego dotyku."""
     if (bad := json_only() or need(admin=False, display=True)):
         return bad
-    if (bad := check_pin((request.get_json(silent=True) or {}).get("pin"))):
+    if (bad := check_pin(body().get("pin"))):
         return bad
     _sec["admin_until"] = time.time() + ADMIN_IDLE
-    return jsonify(ok=True, admin_do=ADMIN_IDLE)
+    return jsonify(ok=True, admin_left=ADMIN_IDLE)
 
 
-@app.post("/api/zabezpieczenia/aktywnosc")
+@app.post("/api/security/activity")
 def api_activity():
     """Wyświetlacz: ktoś dotyka ekranu – przedłuż odblokowanie (samo odpytywanie strony go nie przedłuża)."""
     if (bad := json_only() or need(admin=False, display=True)):
@@ -1635,7 +1716,7 @@ def api_activity():
     return jsonify(ok=True)
 
 
-@app.post("/api/zabezpieczenia/zablokuj")
+@app.post("/api/security/lock")
 def api_lock_panel():
     """Wyświetlacz: przycisk "Zahasłuj Panel"."""
     if (bad := json_only() or need(admin=False, display=True)):
@@ -1644,7 +1725,7 @@ def api_lock_panel():
     return jsonify(ok=True)
 
 
-@app.post("/api/zabezpieczenia/zdejmij-blokade")
+@app.post("/api/security/lift-lockout")
 def api_lift_lockout():
     """Telefon administratora (albo wyświetlacz z Kluczem) zdejmuje blokadę po błędnych PIN-ach."""
     if (bad := json_only() or need()):
@@ -1655,25 +1736,25 @@ def api_lift_lockout():
     return jsonify(ok=True)
 
 
-@app.post("/api/zabezpieczenia/zmien-pin")
+@app.post("/api/security/change-pin")
 def api_change_pin():
     """Nowy PIN. Wyświetlacz z Kluczem i telefon administratora – bez starego PIN-u; wyświetlacz bez Klucza – ze starym."""
     if (bad := json_only()):
         return bad
-    w, data = g.who, request.get_json(silent=True) or {}
-    if not w["wyswietlacz"] and w["poziom"] != ADMIN:
+    w, data = g.who, body()
+    if not w["display"] and w["level"] != ADMIN:
         return need()
-    if w["wyswietlacz"] and not key_present() and not NO_SECURITY and (bad := check_pin(data.get("stary"))):
+    if w["display"] and not key_present() and not NO_SECURITY and (bad := check_pin(data.get("old"))):
         return bad
-    if not valid_pin(data.get("nowy")):
+    if not valid_pin(data.get("new")):
         return jsonify(error=f"PIN musi mieć {PIN_LENGTH} cyfr"), 400
-    set_admin_secret("pin", generate_password_hash(data["nowy"]))
+    set_admin_secret("pin", generate_password_hash(data["new"]))
     log("zmieniono PIN administratora")
     return jsonify(ok=True)
 
 
 # ---- Parowanie: krok 1 Wi-Fi, krok 2 kod, krok 3 decyzja (wyświetlacz albo telefon administratora)
-@app.route("/api/parowanie/wifi")
+@app.route("/api/pairing/wifi")
 def api_pair_wifi():
     if (bad := need()):
         return bad
@@ -1681,7 +1762,7 @@ def api_pair_wifi():
     return jsonify(wifi=wifi, error=problem)
 
 
-@app.post("/api/parowanie/kod")
+@app.post("/api/pairing/code")
 def api_pair_code():
     """Nowy jednorazowy kod (QR z adresem + 6 cyfr), ważny PAIR_CODE_TIME s. Poprzedni przestaje działać."""
     if (bad := json_only() or need()):
@@ -1691,36 +1772,36 @@ def api_pair_code():
     with _sec_lock:
         _sec["code"] = {"token": token, "digits": digits, "until": time.time() + PAIR_CODE_TIME, "tries": 0}
         _sec["request"] = None
-    return jsonify(adres=f"{pairing_address()}/#paruj={token}", cyfry=digits, czas=PAIR_CODE_TIME)
+    return jsonify(address=f"{pairing_address()}/#pair={token}", digits=digits, seconds=PAIR_CODE_TIME)
 
 
-@app.post("/api/parowanie/anuluj")
+@app.post("/api/pairing/cancel")
 def api_pair_cancel():
-    if (bad := json_only() or (None if g.who["wyswietlacz"] else need())):
+    if (bad := json_only() or (None if g.who["display"] else need())):
         return bad
     with _sec_lock:
         _sec["code"] = None
         if _sec["request"] and _sec["request"]["decision"] is None:
-            _sec["request"]["decision"] = "nie"
+            _sec["request"]["decision"] = "no"
             note_decision(_sec["request"], False)
     return jsonify(ok=True)
 
 
 def note_decision(req, agreed):
     """Zapamiętuje na 30 s, jak rozpatrzono prośbę (stan dla pozostałych urządzeń administratora)."""
-    _sec["decided"] = {"id": req["id"], "zgoda": agreed, "until": time.time() + 30}
+    _sec["decided"] = {"id": req["id"], "approved": agreed, "until": time.time() + 30}
 
 
-@app.post("/api/parowanie/zglos")
+@app.post("/api/pairing/claim")
 def api_pair_claim():
     """Telefon podaje kod (z QR albo 6 cyfr) i nazwę. Potem czeka na decyzję na wyświetlaczu."""
     if (bad := json_only()):
         return bad
-    if g.who["poziom"] != UNPAIRED:
+    if g.who["level"] != UNPAIRED:
         return jsonify(error="To urządzenie jest już sparowane z ulem"), 409
-    data = request.get_json(silent=True) or {}
-    token, digits = str(data.get("token") or ""), str(data.get("kod") or "")
-    name = (clean_name(data.get("nazwa")) or network_name(request.remote_addr)
+    data = body()
+    token, digits = str(data.get("token") or ""), str(data.get("code") or "")
+    name = (clean_name(data.get("name")) or network_name(request.remote_addr)
             or clean_name(device_label(request)) or "Telefon")
     now = time.time()
     with _sec_lock:
@@ -1737,96 +1818,96 @@ def api_pair_claim():
                 _sec["code"] = None
                 log(f"kod parowania unieważniony po {PAIR_CODE_TRIES} błędnych próbach ({request.remote_addr})")
                 return jsonify(error="Kod przestał działać po 5 błędnych próbach. Wygeneruj nowy na wyświetlaczu ula."), 410
-            return jsonify(error="Błędny kod", pozostalo=PAIR_CODE_TRIES - code["tries"]), 403
+            return jsonify(error="Błędny kod", remaining=PAIR_CODE_TRIES - code["tries"]), 403
         _sec["code"] = None                                  # kod jednorazowy
         rid = secrets.token_urlsafe(12)
-        _sec["request"] = {"id": rid, "nazwa": name, "until": now + PAIR_CODE_TIME,
+        _sec["request"] = {"id": rid, "name": name, "until": now + PAIR_CODE_TIME,
                            "decision": None, "device": None, "remember": True}
-    session["prosba"] = rid
+    session["request"] = rid
     log(f"prośba o parowanie: {name} ({request.remote_addr})")
-    return jsonify(ok=True, nazwa=name)
+    return jsonify(ok=True, name=name)
 
 
-@app.route("/api/parowanie/status")
+@app.route("/api/pairing/status")
 def api_pair_status():
     """Telefon pyta, czy wyświetlacz już zdecydował. Po zgodzie dostaje ciasteczko urządzenia."""
-    rid = session.get("prosba")
+    rid = session.get("request")
     with _sec_lock:
         req = _sec["request"]
         if not rid or not req or req["id"] != rid:
-            session.pop("prosba", None)
-            return jsonify(stan="brak")
+            session.pop("request", None)
+            return jsonify(status="none")
         if req["decision"] is None:
             if time.time() < req["until"]:
-                return jsonify(stan="czeka")
+                return jsonify(status="waiting")
             _sec["request"] = None
-            session.pop("prosba", None)
-            return jsonify(stan="wygaslo")
+            session.pop("request", None)
+            return jsonify(status="expired")
         _sec["request"] = None
-        session.pop("prosba", None)
-        if req["decision"] != "tak":
-            return jsonify(stan="odrzucone")
-        session["urzadzenie"] = req["device"]
+        session.pop("request", None)
+        if req["decision"] != "yes":
+            return jsonify(status="rejected")
+        session["device"] = req["device"]
         session.permanent = req["remember"]     # niezapamiętane: ciasteczko do zamknięcia przeglądarki
-    return jsonify(stan="przyjete")
+    return jsonify(status="accepted")
 
 
-@app.post("/api/parowanie/decyzja")
+@app.post("/api/pairing/decision")
 def api_pair_decision():
     """Wyświetlacz albo telefon administratora: Dodaj / Odrzuć oraz przełączniki "stałe uprawnienia
     administratora" i "zapamiętaj urządzenie"."""
     if (bad := json_only() or need()):
         return bad
-    data = request.get_json(silent=True) or {}
+    data = body()
     with _sec_lock:
         req = _sec["request"]
-        if not req or req["id"] != data.get("prosba") or req["decision"] is not None:
+        if not req or req["id"] != data.get("request") or req["decision"] is not None:
             return jsonify(error="Ta prośba o parowanie już wygasła."), 410
-        if data.get("zgoda") is not True:
-            req["decision"] = "nie"
+        if data.get("approved") is not True:
+            req["decision"] = "no"
             note_decision(req, False)
-            log(f"odrzucono prośbę o parowanie: {req['nazwa']} ({g.who.get('nazwa') or 'wyświetlacz'})")
+            log(f"odrzucono prośbę o parowanie: {req['name']} ({g.who.get('name') or 'wyświetlacz'})")
             return jsonify(ok=True)
-        admin, remember = data.get("admin") is True, data.get("zapamietaj") is True
+        admin, remember = data.get("admin") is True, data.get("remember") is True
         did = secrets.token_urlsafe(16)
         if remember:
             with _conf_lock:
                 conf = _load_conf()
                 # Ta sama nazwa = to samo urządzenie parowane ponownie (np. po wyczyszczeniu przeglądarki):
                 # stary wpis znika, żeby na liście nie było dwóch „Pixel 9 Pro Karol”.
-                for old in [k for k, d in conf["paired"].items() if d["nazwa"].casefold() == req["nazwa"].casefold()]:
+                for old in [k for k, d in conf["paired"].items() if d["name"].casefold() == req["name"].casefold()]:
                     del conf["paired"][old]
                     _sec["seen"].pop(old, None)
-                    log(f"ponowne parowanie: zastępuję poprzedni wpis „{req['nazwa']}”")
-                conf["paired"][did] = {"nazwa": req["nazwa"], "admin": admin,
-                                       "dodano": time.strftime("%Y-%m-%d %H:%M")}
+                    log(f"ponowne parowanie: zastępuję poprzedni wpis „{req['name']}”")
+                conf["paired"][did] = {"name": req["name"], "admin": admin,
+                                       "added": time.strftime("%Y-%m-%d %H:%M")}
                 _save_conf()
         else:
-            _sec["temp"][did] = {"nazwa": req["nazwa"], "admin": admin, "last": time.time()}
-        req.update(decision="tak", device=did, remember=remember)
+            _sec["temp"][did] = {"name": req["name"], "admin": admin, "last": time.time()}
+        req.update(decision="yes", device=did, remember=remember)
         note_decision(req, True)
-    log(f"sparowano: {req['nazwa']} (" + ("administrator" if admin else "użytkownik")
+    log(f"sparowano: {req['name']} (" + ("administrator" if admin else "użytkownik")
         + (", zapamiętane" if remember else ", na czas wizyty") + ")")
     return jsonify(ok=True)
 
 
 # ---- Urządzenia (zapamiętane)
-@app.route("/api/urzadzenia")
+@app.route("/api/devices")
 def api_devices():
     if (bad := need()):
         return bad
     seen = _sec["seen"]
-    return jsonify(urzadzenia=[
-        {"id": did, "nazwa": d["nazwa"], "admin": d["admin"], "dodano": d.get("dodano", ""),
-         "ostatnio": int(seen[did]) if did in seen else None, "to_urzadzenie": did == g.who.get("id")}
+    return jsonify(devices=[
+        {"id": did, "name": d["name"], "admin": d["admin"], "added": d.get("added", ""),
+         "last_seen": int(seen[did]) if did in seen else None, "this_device": did == g.who.get("id")}
         for did, d in _load_conf()["paired"].items()])
 
 
-@app.post("/api/urzadzenia/zapomnij")
+@app.post("/api/devices/forget")
 def api_device_forget():
     if (bad := json_only() or need()):
         return bad
-    did = (request.get_json(silent=True) or {}).get("id")
+    did = body().get("id")
     with _conf_lock:
         conf = _load_conf()
         dev = conf["paired"].pop(did, None)
@@ -1834,15 +1915,15 @@ def api_device_forget():
             return jsonify(error="Nie ma takiego urządzenia"), 404
         _save_conf()
     _sec["seen"].pop(did, None)
-    log(f"zapomniano urządzenie: {dev['nazwa']}")
+    log(f"zapomniano urządzenie: {dev['name']}")
     return jsonify(ok=True)
 
 
-@app.post("/api/urzadzenia/admin")
+@app.post("/api/devices/admin")
 def api_device_admin():
     if (bad := json_only() or need()):
         return bad
-    data = request.get_json(silent=True) or {}
+    data = body()
     with _conf_lock:
         conf = _load_conf()
         dev = conf["paired"].get(data.get("id"))
@@ -1850,11 +1931,11 @@ def api_device_admin():
             return jsonify(error="Nie ma takiego urządzenia"), 404
         dev["admin"] = data.get("admin") is True
         _save_conf()
-    log(f"{dev['nazwa']}: " + ("nadano" if dev["admin"] else "odebrano") + " uprawnienia administratora")
+    log(f"{dev['name']}: " + ("nadano" if dev["admin"] else "odebrano") + " uprawnienia administratora")
     return jsonify(ok=True)
 
 
-@app.post("/api/urzadzenia/odlacz")
+@app.post("/api/devices/leave")
 def api_device_leave():
     """Telefon sam odłącza się od ula (wylogowanie)."""
     if (bad := json_only() or need(admin=False, phone=True)):
@@ -1867,34 +1948,34 @@ def api_device_leave():
     _sec["temp"].pop(did, None)
     _sec["seen"].pop(did, None)
     session.clear()
-    log(f"urządzenie odłączyło się od ula: {g.who.get('nazwa')}")
+    log(f"urządzenie odłączyło się od ula: {g.who.get('name')}")
     return jsonify(ok=True)
 
 
 # ---- Klucz (tylko wyświetlacz)
-@app.post("/api/klucz/utworz")
+@app.post("/api/key/create")
 def api_key_create():
     """Nowy Klucz na wpiętym pendrivie – tylko gdy żadnego nie ma (inaczej najpierw "Unieważnij")."""
     if (bad := json_only() or need(display=True)):
         return bad
-    if _load_conf()["admin"].get("klucz"):
+    if _load_conf()["admin"].get("key"):
         return jsonify(error="Klucz już istnieje. Najpierw go unieważnij albo zduplikuj."), 409
-    stick = find_stick((request.get_json(silent=True) or {}).get("pendrive"))
+    stick = find_stick(body().get("pendrive"))
     if not stick:
         return jsonify(error="Nie widzę tego pendrive'a. Wepnij go ponownie."), 404
     secret = secrets.token_hex(32)
     try:
-        write_key(stick["sciezka"], secret)
+        write_key(stick["path"], secret)
     except OSError as e:
         return jsonify(error=f"Nie udało się zapisać Klucza: {e.strerror or e}"), 500
-    set_admin_secret("klucz", hashlib.sha256(secret.encode()).hexdigest())
-    log(f"utworzono Klucz na pendrivie {stick['nazwa']}")
-    ejected = safe_eject(stick["sciezka"])
+    set_admin_secret("key", hashlib.sha256(secret.encode()).hexdigest())
+    log(f"utworzono Klucz na pendrivie {stick['name']}")
+    ejected = safe_eject(stick["path"])
     scan_usb(quiet=True)
-    return jsonify(ok=True, odlaczony=ejected)
+    return jsonify(ok=True, removed=ejected)
 
 
-@app.post("/api/klucz/duplikuj/start")
+@app.post("/api/key/duplicate/start")
 def api_key_dup_start():
     """Krok 1 duplikowania: wpięty Klucz zostaje sprawdzony, a jego sekret zapamiętany na 3 minuty."""
     if (bad := json_only() or need(display=True)):
@@ -1906,7 +1987,7 @@ def api_key_dup_start():
     return jsonify(ok=True)
 
 
-@app.post("/api/klucz/duplikuj/zapisz")
+@app.post("/api/key/duplicate/write")
 def api_key_dup_write():
     """Krok 2: po wyjęciu oryginału zapisuje ten sam sekret na drugi pendrive (jest tylko jeden port USB)."""
     if (bad := json_only() or need(admin=False, display=True)):
@@ -1915,23 +1996,23 @@ def api_key_dup_write():
     if not dup or time.time() > dup["until"]:
         _sec["dup"] = None
         return jsonify(error="Minął czas na duplikowanie. Zacznij od nowa z oryginalnym Kluczem."), 410
-    stick = find_stick((request.get_json(silent=True) or {}).get("pendrive"))
+    stick = find_stick(body().get("pendrive"))
     if not stick:
         return jsonify(error="Nie widzę tego pendrive'a. Wepnij go ponownie."), 404
-    if stick["klucz"] == "wazny":
+    if stick["key"] == "valid":
         return jsonify(error="Ten pendrive już jest Kluczem. Wepnij inny."), 409
     try:
-        write_key(stick["sciezka"], dup["secret"])
+        write_key(stick["path"], dup["secret"])
     except OSError as e:
         return jsonify(error=f"Nie udało się zapisać kopii: {e.strerror or e}"), 500
     _sec["dup"] = None
-    log(f"zduplikowano Klucz na pendrive {stick['nazwa']}")
-    ejected = safe_eject(stick["sciezka"])
+    log(f"zduplikowano Klucz na pendrive {stick['name']}")
+    ejected = safe_eject(stick["path"])
     scan_usb(quiet=True)
-    return jsonify(ok=True, odlaczony=ejected)
+    return jsonify(ok=True, removed=ejected)
 
 
-@app.post("/api/klucz/duplikuj/anuluj")
+@app.post("/api/key/duplicate/cancel")
 def api_key_dup_cancel():
     if (bad := json_only() or need(admin=False, display=True)):
         return bad
@@ -1939,12 +2020,12 @@ def api_key_dup_cancel():
     return jsonify(ok=True)
 
 
-@app.post("/api/klucz/uniewaznij")
+@app.post("/api/key/revoke")
 def api_key_revoke():
     """Wszystkie kopie Klucza przestają działać (Klucz albo PIN). Panel zostaje odblokowany, by od razu utworzyć nowy."""
     if (bad := json_only() or need(display=True)):
         return bad
-    set_admin_secret("klucz", None)
+    set_admin_secret("key", None)
     scan_usb(quiet=True)
     _sec["admin_until"] = time.time() + ADMIN_IDLE
     log("Klucz unieważniony")
@@ -1952,7 +2033,7 @@ def api_key_revoke():
 
 
 def set_pin_from_console():
-    """python3 app.py --ustaw-pin – pierwszy PIN (albo zapomniany): kto ma konsolę Raspberry, ten jest właścicielem."""
+    """python3 app.py --set-pin – pierwszy PIN (albo zapomniany): kto ma konsolę Raspberry, ten jest właścicielem."""
     print(f"BEENest – nowy PIN administratora ({PIN_LENGTH} cyfr).")
     first = getpass.getpass("PIN: ")
     if not valid_pin(first):
@@ -1967,7 +2048,7 @@ def set_pin_from_console():
 #  Uruchomienie
 # -------------------------------------------------------------
 if __name__ == "__main__":
-    if "--ustaw-pin" in sys.argv:
+    if "--set-pin" in sys.argv:
         set_pin_from_console()
         sys.exit(0)
     PORT = choose_port()
@@ -1984,9 +2065,9 @@ if __name__ == "__main__":
         later.daemon = True                 # nie wstrzymuje zamknięcia serwera
         later.start()
         if NO_SECURITY:
-            log("UWAGA: BEENEST_BEZ_ZABEZPIECZEN=1 – każde urządzenie jest administratorem (tylko do testów)")
+            log("UWAGA: BEENEST_NO_SECURITY=1 – każde urządzenie jest administratorem (tylko do testów)")
         elif not pin_hash():
-            log("PIN administratora nie jest ustawiony – ustaw go: python3 app.py --ustaw-pin")
+            log("PIN administratora nie jest ustawiony – ustaw go: python3 app.py --set-pin")
         addresses = lan_addresses()
         # Nazwa wskazuje na adres, którym komputer wychodzi do sieci; bez trasy domyślnej (hotspot
         # offline) – na wszystkie adresy. Na Raspberry z hotspotem lepiej: hostnamectl set-hostname beenest.
