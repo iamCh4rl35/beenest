@@ -79,6 +79,7 @@ from wellbeing_detector_driver import WELLBEING_OK_HZ, WELLBEING_SENSITIVE_HZ, W
 # Wylotek: pozycja serwa w %. Poniżej/powyżej progów = zablokowany/otwarty, pomiędzy = w ruchu.
 OUTLET_BLOCKED_BELOW = 5
 OUTLET_OPEN_ABOVE = 95
+OUTLET_MAX_RULES = 6        # reguły otwarcia wylotka o godzinie (global.conf [wylotek])
 
 SENSORS = (atmosphere, wellbeing, feeder, outlet)
 
@@ -94,7 +95,7 @@ DAY_RANGES = {
     "temp_humidity": "temp_humidity", "temp_outside_humidity": "temp_outside_humidity",
     "temp_pressure": "temp_pressure", "temp_outside_pressure": "temp_outside_pressure",
 }
-FEEDER_HISTORY_KEYS = ("f_level", "f_weight")
+FEEDER_HISTORY_KEYS = ("f_level",)
 
 # Wykresy: zakres -> (ile sekund wstecz od teraz, szerokość przedziału, z którego liczymy średnią)
 _H, _D = 3600, 86400
@@ -135,6 +136,7 @@ DEVICE_SETTINGS = {
     "wellbeingData":     ("stan", {"stan", "natezenie", "czestotliwosci"}),
     "feederData":        ("poziom", {"poziom", "ostatnie"}),
     "feederAlarm":       (True, None),
+    "feederWords":       (True, None),      # poziom dokarmiaczki słownie (Pełny, Zapas płynu…) zamiast w %
     "camera":            ("external", {"external", "internal"}),
     # % na suwaku (1–100) – tylko wyświetlacz przy ulu; 1 % = 60 % prawdziwej jasności (niżej panel ma błędy obrazu)
     "brightness":        ("100", {str(v) for v in range(1, 101)}),
@@ -275,7 +277,7 @@ def kv_set(key, value):
 #  aplikacji – zmiana daty pliku = wczytanie od nowa. Zła wartość = wartość domyślna + komunikat.
 # -------------------------------------------------------------
 _conf_lock = threading.RLock()
-_conf = {"mtime": None, "zapis": {}, "wyglad": {}, "devices": {}, "admin": {}, "paired": {}}
+_conf = {"mtime": None, "zapis": {}, "wyglad": {}, "devices": {}, "admin": {}, "paired": {}, "outlet": []}
 DEVICE_PREFIX = "urzadzenie "
 PAIRED_PREFIX = "sparowane "
 _BOOL = {"true": True, "tak": True, "1": True, "yes": True, "on": True,
@@ -322,13 +324,24 @@ def _migrate_old_settings():
     return {k: v for k, v in old.items() if k in SERVER_SETTINGS}
 
 
+_RULE_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)\s+(\d{1,3})$")
+
+
+def parse_outlet_rule(text):
+    """„GG:MM procent” -> {godzina, pozycja}; zły zapis = None."""
+    m = _RULE_RE.match(str(text or "").strip())
+    if not m or int(m[3]) > 100:
+        return None
+    return {"godzina": f"{m[1]}:{m[2]}", "pozycja": int(m[3])}
+
+
 def _load_conf():
     """Wczytuje plik, jeśli zmienił się od ostatniego razu. Brak pliku = tworzy go z domyślnymi."""
     with _conf_lock:
         try:
             mtime = os.stat(CONF_PATH).st_mtime_ns
         except FileNotFoundError:
-            _conf.update(mtime=None, zapis=_migrate_old_settings(), wyglad={}, devices={}, admin={}, paired={})
+            _conf.update(mtime=None, zapis=_migrate_old_settings(), wyglad={}, devices={}, admin={}, paired={}, outlet=[])
             _save_conf()
             return _conf
         if mtime == _conf["mtime"]:
@@ -339,7 +352,7 @@ def _load_conf():
             cp.read(CONF_PATH, encoding="utf-8")
         except configparser.Error as e:
             log(f"global.conf jest uszkodzony ({e}) – używam domyślnych, plik zostawiam bez zmian")
-            _conf.update(mtime=mtime, zapis={}, wyglad={}, devices={}, admin={}, paired={})
+            _conf.update(mtime=mtime, zapis={}, wyglad={}, devices={}, admin={}, paired={}, outlet=[])
             return _conf
         wyglad = {}
         for key, value in (cp["wyglad"].items() if cp.has_section("wyglad") else ()):
@@ -366,7 +379,15 @@ def _load_conf():
                     "admin": _BOOL.get(sec.get("admin", "false").strip().lower(), False),
                     "dodano": sec.get("dodano", "").strip(),
                 }
-        _conf.update(mtime=mtime, zapis=zapis, wyglad=wyglad, devices=devices, admin=admin, paired=paired)
+        outlet = []
+        for key, value in (cp["wylotek"].items() if cp.has_section("wylotek") else ()):
+            rule = parse_outlet_rule(value)
+            if rule and len(outlet) < OUTLET_MAX_RULES:
+                outlet.append(rule)
+            else:
+                log(f"global.conf [wylotek]: pomijam '{key} = {value}'")
+        _conf.update(mtime=mtime, zapis=zapis, wyglad=wyglad, devices=devices, admin=admin, paired=paired,
+                     outlet=outlet)
         return _conf
 
 
@@ -394,6 +415,10 @@ def _save_conf():
                   "# Tylko skróty (hash), nigdy same wartości. PIN (6 cyfr) ustawisz w konsoli: python3 app.py --ustaw-pin",
                   "# klucz = skrót sekretu z pliku beenest.klucz na pendrivie (Klucz). Usunięcie linijki = brak PIN-u / Klucza."]
         lines += [f"{k} = {a[k]}" for k in ("pin", "klucz") if a.get(k)]
+        lines += ["", "[wylotek]",
+                  f"# Reguły otwarcia wylotka (najwyżej {OUTLET_MAX_RULES}): regulaN = GG:MM procent (0 = zablokowany,",
+                  "# 100 = otwarty). O tej godzinie ul ustawia wylotek. Ustawisz je też w panelu: Stan wylotka → Sterowanie."]
+        lines += [f"regula{i} = {r['godzina']} {r['pozycja']}" for i, r in enumerate(_conf["outlet"], 1)]
         lines += ["", "# ---- Sparowane urządzenia (zapamiętane). admin = stałe uprawnienia administratora.",
                   "# Usuń całą sekcję, by ul zapomniał urządzenie (będzie musiało sparować się od nowa)."]
         for did, dev in _conf["paired"].items():
@@ -608,6 +633,30 @@ def ring_buzzer():
     except Exception as e:
         log(f"buzzer: {e}")
 
+def move_outlet(percent, who):
+    """Ustawia wylotek (serwo) i od razu poprawia ostatni odczyt, żeby strona nie czekała na kolejną próbkę."""
+    outlet.set_position(percent)
+    if _latest:                          # przypisanie w słowniku jest atomowe – bez blokady (woła to też sample_once)
+        _latest["o_position"] = float(percent)
+        _latest["o_status"] = outlet_status(float(percent))
+    if who:
+        log(f"wylotek: {percent:g} % ({who})")
+
+
+def run_outlet_rules(now):
+    """Reguły z [wylotek]: o podanej godzinie (co do minuty) ustawia wylotek. Każda minuta tylko raz."""
+    minute = time.strftime("%H:%M", time.localtime(now))
+    if minute == _state.get("outlet_minute"):
+        return
+    _state["outlet_minute"] = minute
+    for rule in _load_conf()["outlet"]:
+        if rule["godzina"] == minute:
+            try:
+                move_outlet(rule["pozycja"], f"reguła {minute}")
+            except Exception as e:
+                track("wylotek", e)
+
+
 def save_history(raw, settings, now):
     """Zapis do historii co 'Interwał zapisu danych' + usuwanie starszych niż 'Długość przetrzymywania'."""
     if _state["last_save"] is None:      # po restarcie nie dubluj zapisu
@@ -672,6 +721,7 @@ def sample_once():
         now = time.time()
         raw = read_sensors()
         detect_refill(raw["f_level"], now)
+        run_outlet_rules(now)
         save_history(raw, get_server_settings(), now)
         _latest = build_payload(raw, now)
 
@@ -838,6 +888,49 @@ def run_system_command(args, timeout=60):
                           check=True, timeout=timeout)
 
 
+# ---- Logo startowe w kolorach motywu wyświetlacza: (tło, „BEE”, „NEST”) – zmierzone z CSS panelu na wyświetlaczu.
+# Serwer zapisuje data/logo.png (+ logo.kolor = tło, logo.motyw = wariant). Tło kiosku (pi/tlo.sh) bierze je od razu,
+# Plymouth po przebudowie initramfs – robi to usługa beenest-logo (root, pi/instaluj.sh), gdy logo.png się zmieni.
+BOOT_LOGO_COLORS = {
+    "bialy-pylek/normal": ("#FFFFFF", "#0F0F10", "#FF8A00"),
+    "bialy-pylek/high": ("#FFFFFF", "#0F0F10", "#000000"),
+    "lekki-miodek/normal": ("#FFF8E7", "#4A2F1A", "#FF9E00"),
+    "lekki-miodek/high": ("#FFF2E0", "#1A1A1A", "#E65100"),
+    "nocna-czern/normal": ("#000000", "#FFFFFF", "#FF8A00"),
+    "nocna-czern/high": ("#000000", "#FFFFFF", "#FFFFFF"),
+    "miodna-szarosc/normal": ("#2E2410", "#FFF3DC", "#FFB800"),
+    "miodna-szarosc/high": ("#000000", "#FFFFFF", "#FFC107"),
+}
+_logo_lock = threading.Lock()
+
+
+def update_boot_logo():
+    """Przy starcie serwera i po zmianie motywu / kontrastu na wyświetlaczu. Tylko na Raspberry."""
+    if not on_raspberry():
+        return
+    with _logo_lock:
+        dev = get_device_settings(DISPLAY_ADDRESSES[0])
+        key = f"{dev['theme']}/{'high' if dev['highContrast'] else 'normal'}"
+        data = os.path.join(ROOT, "data")
+        try:
+            with open(os.path.join(data, "logo.motyw"), encoding="utf-8") as f:
+                if f.read().strip() == key and os.path.exists(os.path.join(data, "logo.png")):
+                    return
+        except OSError:
+            pass
+        bg, bee, nest = BOOT_LOGO_COLORS[key]
+        try:
+            subprocess.run([sys.executable, os.path.join(ROOT, "pi", "logo.py"), os.path.join(ROOT, "pi", "logo-startowe.png"),
+                            os.path.join(data, "logo.png.tmp"), bg, bee, nest], check=True, capture_output=True, timeout=120)
+            for name, text in (("logo.kolor", bg), ("logo.motyw", key)):
+                with open(os.path.join(data, name), "w", encoding="utf-8") as f:
+                    f.write(text + "\n")
+            os.replace(os.path.join(data, "logo.png.tmp"), os.path.join(data, "logo.png"))
+            log(f"logo startowe: {key}")
+        except (OSError, subprocess.SubprocessError) as e:
+            log(f"logo startowe: błąd: {e!r}")
+
+
 def on_raspberry():
     try:
         with open("/proc/device-tree/model", encoding="ascii", errors="replace") as f:
@@ -908,7 +1001,7 @@ _sec = {
     "seen": {},             # zapamiętane urządzenia: id -> ostatnie zapytanie
     "dup": None,            # duplikowanie Klucza: {secret, until}
 }
-_usb = {"sticks": [], "key_path": None, "event": 0, "event_type": None}
+_usb = {"sticks": [], "key_path": None, "event": 0, "event_type": None, "tried": set(), "busy": False}
 
 
 def is_display():
@@ -1060,8 +1153,92 @@ def scan_usb(quiet=False):
             log("Klucz wyjęty")
 
 
+def usb_automount():
+    """
+    Raspberry: sesja kiosku nie ma menedżera plików, który sam montowałby pendrive'y (/media było puste),
+    więc montuje je serwer przez udisksctl → /media/<użytkownik>/<nazwa>. Prawo do tego daje usłudze reguła
+    polkit z pi/instaluj.sh. Tylko dyski USB i tylko partycje z systemem plików (np. FAT, exFAT, NTFS).
+    Każdą partycję próbujemy raz – do wyjęcia pendrive'a. Po wyjęciu udisks sam sprząta punkt montowania.
+    """
+    if sys.platform != "linux" or os.environ.get("BEENEST_USB") or not shutil.which("udisksctl"):
+        return
+    if not glob.glob("/sys/class/block/sd*"):           # nic nie jest wpięte – bez uruchamiania lsblk
+        _usb["tried"].clear()
+        return
+    out = subprocess.run(["lsblk", "-J", "-l", "-p", "-o", "PATH,PKNAME,TRAN,FSTYPE,MOUNTPOINT"],
+                         capture_output=True, text=True, timeout=5).stdout
+    devices = json.loads(out or "{}").get("blockdevices") or []
+    disks = {d["path"] for d in devices if d.get("tran") == "usb"}          # partycje mają TRAN puste
+    usb = [d for d in devices if d["path"] in disks or d.get("pkname") in disks]
+    todo = [d["path"] for d in usb
+            if d.get("fstype") and not d.get("mountpoint") and d["path"] not in _usb["tried"]]
+    _usb["tried"] &= {d["path"] for d in usb}           # wyjęty pendrive – przy następnym wpięciu znów próbujemy
+    for path in todo:
+        _usb["tried"].add(path)
+        r = subprocess.run(["udisksctl", "mount", "-b", path, "--no-user-interaction"],
+                           capture_output=True, text=True, timeout=30)
+        if r.returncode:
+            # NTFS wyjęty z Windows bez „bezpiecznego usuwania” (albo przy szybkim uruchamianiu Windows) ma
+            # niezamknięty dziennik – jądro odmawia zapisu („failed to replay log file”). Tylko do odczytu
+            # Klucz da się sprawdzić; zapisu (nowy Klucz, kopia) nie – wtedy chkdsk w Windows albo FAT32 / exFAT.
+            log(f"pendrive {path}: nie da się zamontować do zapisu, próbuję tylko do odczytu "
+                f"({r.stderr.strip().splitlines()[-1] if r.stderr.strip() else r.returncode})")
+            r = subprocess.run(["udisksctl", "mount", "-b", path, "-o", "ro", "--no-user-interaction"],
+                               capture_output=True, text=True, timeout=30)
+        log(f"pendrive {path}: " + (r.stdout.strip() or r.stderr.strip() or "zamontowany"))
+
+
+def safe_eject(mount):
+    """
+    „Bezpieczne usuwanie” po zapisie Klucza: odmontowanie i wyłączenie pendrive'a (udisksctl power-off).
+    Powód (2026-11-21): tani pendrive potwierdził zapis, ale trzymał dane we własnej pamięci podręcznej –
+    wyjęty 6 s później miał plik beenest.klucz o dobrym rozmiarze, wypełniony bajtami 0xFF. Jądro
+    zakłada „write through” i nie każe mu jej opróżnić; dopiero wyłączenie go do tego zmusza.
+    True = pendrive wyłączony (można go wyjąć). False = nie wyszło – zostaje zamontowany, trzeba chwilę odczekać.
+    """
+    if sys.platform != "linux" or os.environ.get("BEENEST_USB") or not shutil.which("udisksctl"):
+        return False
+    dev = None
+    with open("/proc/mounts", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            src, target = line.split()[:2]
+            if re.sub(r"\\(\d{3})", lambda m: chr(int(m[1], 8)), target) == mount:   # spacje jako \040
+                dev = src
+    if not dev:
+        return False
+    disk = subprocess.run(["lsblk", "-no", "PKNAME", dev], capture_output=True, text=True, timeout=5).stdout.strip()
+
+    def run(*args):
+        r = subprocess.run(["udisksctl", *args, "--no-user-interaction"], capture_output=True, text=True, timeout=30)
+        return r.returncode == 0, (r.stderr.strip() or r.stdout.strip()).splitlines()[-1:] or [""]
+
+    _usb["busy"] = True                  # bez tego usb_loop uznałby odmontowanie za wyjęcie Klucza
+    try:
+        os.sync()
+        ok, msg = run("unmount", "-b", dev)
+        if not ok:
+            log(f"pendrive {dev}: nie da się odmontować ({msg[0]})")
+            return False
+        ok, msg = run("power-off", "-b", f"/dev/{disk}" if disk else dev)
+        if not ok:
+            log(f"pendrive {dev}: nie da się wyłączyć ({msg[0]}) – montuję ponownie")
+            _usb["tried"].discard(dev)   # usb_automount zamontuje go znowu
+            return False
+        log(f"pendrive {dev}: bezpiecznie odłączony")
+        return True
+    finally:
+        _usb["busy"] = False
+
+
 def usb_loop():
     while True:
+        if _usb["busy"]:
+            time.sleep(0.2)
+            continue
+        try:
+            usb_automount()
+        except Exception as e:
+            track("usb-montowanie", e)
         try:
             scan_usb()
             track("usb")
@@ -1293,6 +1470,8 @@ def api_settings():
             set_settings(changes, request.remote_addr, device_label(request))
         except ValueError as e:
             return jsonify(error=str(e)), 400
+        if g.who["wyswietlacz"] and ("theme" in changes or "highContrast" in changes):
+            threading.Thread(target=update_boot_logo, daemon=True).start()
     return jsonify({**get_server_settings(), **get_device_settings(request.remote_addr)})
 
 
@@ -1332,6 +1511,7 @@ def api_screen_sleep():
         _screen["zadanie"] += 1
         log(f"{g.who.get('nazwa') or request.remote_addr}: zgaszenie ekranu ula")
         return jsonify(ok=True, zdalnie=True)
+    _sec["admin_until"] = 0.0      # zgaszony ekran = zahasłowany panel (jak „Zahasłuj Panel”; wpięty Klucz nadal działa)
     return jsonify(ok=True, wylaczony=screen_power(False))
 
 
@@ -1340,6 +1520,44 @@ def api_screen_wake():
     if (bad := json_only() or need(admin=False, display=True)):
         return bad
     return jsonify(ok=True, wlaczony=screen_power(True))
+
+
+@app.post("/api/wylotek")
+def api_outlet_move():
+    """Stan wylotka → przyciski i suwak (na żywo, strona wysyła kolejne pozycje w trakcie przesuwania)."""
+    if (bad := json_only() or need()):
+        return bad
+    value = to_number((request.get_json(silent=True) or {}).get("pozycja"))
+    if value is None or not 0 <= value <= 100:
+        return jsonify(error="Pozycja wylotka musi być liczbą od 0 do 100"), 400
+    try:
+        move_outlet(round(value), None)
+    except OSError as e:
+        return jsonify(error=f"Nie udało się poruszyć wylotkiem: {e.strerror or e}"), 500
+    return jsonify(ok=True, pozycja=round(value))
+
+
+@app.route("/api/wylotek/reguly", methods=["GET", "POST"])
+def api_outlet_rules():
+    """Reguły otwarcia: lista {godzina: "GG:MM", pozycja: 0–100}, najwyżej OUTLET_MAX_RULES. Zmiana: administrator."""
+    if request.method == "GET":
+        return jsonify(reguly=_load_conf()["outlet"], najwiecej=OUTLET_MAX_RULES)
+    if (bad := json_only() or need()):
+        return bad
+    raw = (request.get_json(silent=True) or {}).get("reguly")
+    if not isinstance(raw, list) or len(raw) > OUTLET_MAX_RULES:
+        return jsonify(error=f"Najwyżej {OUTLET_MAX_RULES} reguł"), 400
+    rules = []
+    for item in raw:
+        rule = isinstance(item, dict) and parse_outlet_rule(f"{item.get('godzina')} {item.get('pozycja')}")
+        if not rule:
+            return jsonify(error="Zła reguła – godzina GG:MM i procent od 0 do 100"), 400
+        rules.append(rule)
+    with _conf_lock:
+        _load_conf()["outlet"] = rules
+        _save_conf()
+    log(f"wylotek: reguły otwarcia ({len(rules)}) zapisane")
+    return jsonify(ok=True, reguly=rules)
 
 
 @app.post("/api/history/clear")
@@ -1670,9 +1888,10 @@ def api_key_create():
     except OSError as e:
         return jsonify(error=f"Nie udało się zapisać Klucza: {e.strerror or e}"), 500
     set_admin_secret("klucz", hashlib.sha256(secret.encode()).hexdigest())
-    scan_usb(quiet=True)
     log(f"utworzono Klucz na pendrivie {stick['nazwa']}")
-    return jsonify(ok=True)
+    ejected = safe_eject(stick["sciezka"])
+    scan_usb(quiet=True)
+    return jsonify(ok=True, odlaczony=ejected)
 
 
 @app.post("/api/klucz/duplikuj/start")
@@ -1706,9 +1925,10 @@ def api_key_dup_write():
     except OSError as e:
         return jsonify(error=f"Nie udało się zapisać kopii: {e.strerror or e}"), 500
     _sec["dup"] = None
-    scan_usb(quiet=True)
     log(f"zduplikowano Klucz na pendrive {stick['nazwa']}")
-    return jsonify(ok=True)
+    ejected = safe_eject(stick["sciezka"])
+    scan_usb(quiet=True)
+    return jsonify(ok=True, odlaczony=ejected)
 
 
 @app.post("/api/klucz/duplikuj/anuluj")
@@ -1755,6 +1975,7 @@ if __name__ == "__main__":
     # tylko w tym, który faktycznie obsługuje żądania.
     if not DEBUG or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         start_sampler()
+        threading.Thread(target=update_boot_logo, daemon=True).start()
         threading.Thread(target=usb_loop, name="usb", daemon=True).start()
         # Po restarcie serwera strona nie pamięta uśpienia – obraz musi być włączony, inaczej dotyk
         # klikałby w ciemno. Sesja graficzna wstaje po serwerze, więc próbujemy też chwilę później.

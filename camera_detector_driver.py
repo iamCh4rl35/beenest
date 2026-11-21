@@ -12,6 +12,8 @@ import threading
 import time
 from collections import deque
 
+import ir_driver
+
 KEYS = ("m_signal", "m_updated")
 CAMERAS = ("external", "internal")
 
@@ -126,9 +128,20 @@ class _Camera:
                 self._cam = None
             raise
         self._cam = cam
+        self._ir(True)
+
+    def _ir(self, on):
+        """Naświetlacze podczerwieni świecą tylko razem z kamerą, przy której są (ir_driver.py)."""
+        if self.name == ir_driver.CAMERA:
+            try:
+                ir_driver.set_on(on)
+            except Exception as e:
+                print(f"[BEENest] naświetlacze IR: {e!r}", flush=True)
 
     def _stop(self):
         cam, self._cam = self._cam, None
+        if cam not in (None, "demo"):
+            self._ir(False)
         if cam == "demo":
             self._stop_demo.set()
         elif cam is not None:

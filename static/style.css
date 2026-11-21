@@ -448,6 +448,12 @@ main {
   color: var(--orange);
 }
 
+/* Długi napis (np. „Wymaga napełnienia”) w jednej linijce – w dwóch rozpychał menu główne na 1024×600 */
+.card-status.is-long {
+  font-size: clamp(18px, 2.2vw, 22px);
+  white-space: nowrap;
+}
+
 .card-caption {
   margin-top: 4px;
   font-size: 12px;
@@ -613,6 +619,257 @@ body[data-contrast="high"] .stat.primary .unit {
   justify-content: space-between;
   gap: 12px;
   font-size: 14.5px;
+}
+
+/* Dokarmiaczka: model zbiornika jak bateria – opis po lewej, pionowy zbiornik z 4 częściami po prawej.
+   Części zapala renderFeeder() w app.js od dołu (.tank-body ma odwróconą kolejność). */
+.tank-panel {
+  flex: 1;                   /* zajmuje resztę ekranu pod kafelkami (.page to kolumna flex) */
+  margin-bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.tank-info {
+  min-width: 0;
+}
+
+.tank-label {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tank-value {
+  margin-top: 6px;
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 900;
+  letter-spacing: -.6px;
+  line-height: 1.1;
+}
+
+.tank-desc {
+  margin-top: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.tank {
+  flex-shrink: 0;
+  align-self: stretch;       /* zbiornik rośnie razem z panelem */
+  display: flex;
+  align-items: center;
+}
+
+.tank-body {
+  height: 100%;
+  min-height: 176px;
+  max-height: 420px;
+  aspect-ratio: 140 / 176;   /* około 4 : 5 – szerszy niż bateria, ale wciąż pionowy */
+  padding: 6px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 6px;
+  border: 3px solid var(--line);
+  border-radius: 18px;
+}
+
+.tank-seg {
+  flex: 1;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--line) 60%, transparent);
+  transition: background var(--anim-duration);
+}
+
+.tank-seg.is-on {
+  background: var(--orange);
+}
+
+/* Stan wylotka: opis i przyciski po lewej (przyciski w lewym dolnym rogu), model zasuwy po prawej.
+   Zasuwę przesuwa renderOutlet() w app.js (transform w jednostkach viewBox). */
+.door-panel {
+  flex: 1;
+  margin-bottom: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.door-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.door-actions {
+  margin-top: auto;          /* do dołu panelu */
+  padding-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.door-actions .back-btn {
+  margin: 0;
+  font-family: inherit;
+}
+
+.door {
+  flex-shrink: 1;
+  align-self: center;
+  width: min(46%, 380px);
+  height: auto;
+  overflow: visible;
+}
+
+.door-hole {
+  fill: color-mix(in srgb, var(--black) 82%, var(--card-background));   /* ciemny w jasnych motywach, jasny w ciemnych */
+}
+
+.door-slide {
+  fill: var(--orange);
+  transition: transform var(--anim-duration) var(--anim-ease);
+}
+
+.door-outline {
+  fill: none;
+  stroke: var(--black);      /* na otworze zlewa się z nim, na zasuwie widać obrys koła */
+  stroke-width: 2.5;
+  opacity: .6;
+}
+
+.door.is-unknown .door-slide {
+  fill: var(--line);
+}
+
+/* Okno „Sterowanie wylotkiem”: reguły otwarcia */
+.rules-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rules {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.rule-value {
+  padding: 5px 12px;
+  border: 2px solid var(--orange);
+  border-radius: 10px;
+  background: var(--orange-soft);
+  color: var(--black);
+  font: 800 15px/1.2 var(--font);
+  cursor: pointer;
+  transition: transform var(--anim-duration) var(--anim-ease);
+}
+
+.rule-value.is-zoom {
+  transform: scale(1.25);
+}
+
+.rule-delete {
+  margin-left: auto;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #D32F2F;
+  font: 800 13px/1.2 var(--font);
+  cursor: pointer;
+}
+
+.rule-add {
+  align-self: flex-start;
+  padding: 7px 14px;
+  border: 2px dashed var(--orange);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--orange-dark);
+  font: 800 14px/1.2 var(--font);
+  cursor: pointer;
+}
+
+/* Klawiatura numeryczna nad oknem (osobna warstwa – w karcie okna backdrop-filter więziłby position:fixed).
+   Karta wyrasta z klikniętej wartości (transform-origin ustawia app.js). Nad oknem (200), pod PIN-em (210). */
+.numpad-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 205;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0);
+  transition: background var(--anim-duration) var(--anim-ease);
+}
+
+.numpad-layer.open {
+  background: rgba(0, 0, 0, .25);
+}
+
+.numpad {
+  width: min(100%, 340px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 24px;
+  border-radius: 28px;
+  background: var(--card-background);
+  border: 1px solid var(--dock-border);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .30);
+  transform: scale(.15);
+  opacity: 0;
+  transition: transform var(--anim-duration) var(--anim-ease), opacity var(--anim-duration) var(--anim-ease);
+}
+
+.numpad-layer.open .numpad {
+  transform: none;
+  opacity: 1;
+}
+
+.numpad-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.numpad-display {
+  font-size: 36px;
+  font-weight: 900;
+  letter-spacing: -.5px;
+}
+
+.numpad-display.is-placeholder {
+  opacity: .4;
+}
+
+.numpad .pin-pad {
+  max-width: 300px;
+}
+
+.numpad-ok {
+  margin: 0;
+  min-width: 160px;
+  font-family: inherit;
 }
 
 .bar {
@@ -2173,7 +2430,12 @@ body[data-contrast="high"] .chart-line {
     width: auto;
     flex: 1;
     justify-content: center;
-    padding: 8px 12px;
+    padding: 8px 10px;
+  }
+
+  /* Cztery kategorie ustawień (z Wylotkiem) w jednym rzędzie telefonu: bez ikon */
+  .settings-sidebar .camera-dock-btn svg {
+    display: none;
   }
 
   .page-bar {

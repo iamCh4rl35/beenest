@@ -119,6 +119,7 @@
     dataRetention: '12',
     feederRate: true,
     feederAlarm: true,
+    feederWords: true,          // poziom dokarmiaczki słownie zamiast w %
     camera: 'external',
     brightness: '100'          // % – tylko wyświetlacz przy ulu (sekcja 15)
   };
@@ -145,7 +146,8 @@
   const TOGGLES = {
     'contrast-toggle': 'highContrast',
     'feeder-rate-toggle': 'feederRate',
-    'feeder-alarm-toggle': 'feederAlarm'
+    'feeder-alarm-toggle': 'feederAlarm',
+    'feeder-words-toggle': 'feederWords'
   };
 
   const device = window.BEENEST_DEVICE || { settings: {}, known: true };
@@ -881,7 +883,7 @@
     temp_pressure: 0, temp_pressure_min: 0, temp_pressure_max: 0,
     temp_outside_pressure: 0, temp_outside_pressure_min: 0, temp_outside_pressure_max: 0,
     w_frequency: 0, w_sound: 0,
-    f_level: 0, f_weight: 1,
+    f_level: 0,
     o_position: 0,
     m_signal: 0
   };
@@ -993,6 +995,13 @@
         ? 'Otwarcie ' + format('o_position', state.o_position) + ' %'
         : 'Serwomechanizm';
     }
+    // Model wylotka: zasuwa (88 jednostek szerokości) odsuwa się w lewo o całą szerokość przy 100 %
+    if ($('outlet-door-slide')) {
+      const p = isNum(state.o_position) ? Math.max(0, Math.min(100, Number(state.o_position))) : 0;
+      $('outlet-door-slide').style.transform = 'translateX(' + (-88 * p / 100) + 'px)';
+      $('outlet-door').classList.toggle('is-unknown', !isNum(state.o_position));
+    }
+    if ($('o-position-label')) $('o-position-label').textContent = withUnit('o_position', '%');
   }
 
   // Kafelek "Samopoczucie": ustawienie "Dane panelu samopoczucia".
@@ -1005,8 +1014,50 @@
     if ($('dash-wellbeing-caption')) $('dash-wellbeing-caption').textContent = caption;
   }
 
+  // Poziom dokarmiaczki słownie. Sterownik podaje 100 / 80 / 40 / 15 % (3 / 2 / 1 / 0 czujników widzi ciecz,
+  // feeder_detector_driver.py) – progi pośrodku, żeby słowo wynikało z poziomu, a nie z dokładnej liczby.
+  const FEEDER_WORDS = ['Wymaga napełnienia', 'Połowa zbiornika', 'Zapas płynu', 'Pełny'];
+  // Ile czujników widzi ciecz (0–3), null = brak odczytu
+  function feederSensors(v) {
+    if (!isNum(v)) return null;
+    v = Number(v);
+    return v >= 90 ? 3 : v >= 60 ? 2 : v >= 28 ? 1 : 0;
+  }
+  function feederWord(v) {
+    const n = feederSensors(v);
+    return n === null ? '--' : FEEDER_WORDS[n];
+  }
+
+  // Wejście na stronę Dokarmiaczka: model zbiornika „ładuje się” od dołu do obecnego poziomu w TANK_FILL_MS.
+  // Bez danych (pierwsze wejście prosto na #dokarmiaczka) animacja czeka na pierwszy odczyt.
+  const TANK_FILL_MS = 500;
+  let tankPending = location.hash === '#dokarmiaczka', tankAnimating = false;
+  function fillTank(n) {
+    const segs = [...document.querySelectorAll('#feeder-tank .tank-seg')];
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+    tankAnimating = true;
+    segs.forEach(seg => { seg.style.transition = 'none'; seg.classList.remove('is-on'); });
+    void document.body.offsetHeight;                   // przeglądarka musi najpierw narysować pusty zbiornik
+    const lit = n + 1, step = TANK_FILL_MS / lit;      // każda część zapala się po poprzedniej
+    segs.forEach((seg, i) => {
+      seg.style.transition = 'background ' + step + 'ms linear ' + (i * step) + 'ms';
+      seg.classList.toggle('is-on', i < lit);
+    });
+    setTimeout(() => {
+      segs.forEach(seg => { seg.style.transition = ''; });
+      tankAnimating = false;
+      renderFeeder();                                  // poziom mógł się zmienić w trakcie
+    }, TANK_FILL_MS);
+    return true;
+  }
+  window.addEventListener('hashchange', () => {
+    if (location.hash === '#dokarmiaczka') { tankPending = true; renderFeeder(); }
+  });
+
   // Kafelek "Stan dokarmiaczki": ustawienie "Stan dokarmiaczki (duży panel)".
+  // "Słowny stan dokarmiaczki": słowo zamiast procentów na kafelku i na stronie Dokarmiaczka (pasek zostaje).
   function renderFeeder() {
+    const words = !!settings.feederWords;
     let text, caption;
     if (settings.feederData === 'ostatnie') {
       const d = toDate(state.f_last);
@@ -1014,9 +1065,30 @@
       text = d ? d.toLocaleDateString('pl-PL', { dateStyle: 'medium' }) : '--';
     } else {
       caption = 'Poziom zbiornika';
-      text = withUnit('f_level', '%');
+      text = words ? feederWord(state.f_level) : withUnit('f_level', '%');
     }
-    if ($('dash-feeder-compact')) $('dash-feeder-compact').textContent = text;
+    if (words && $('f-level')) $('f-level').textContent = feederWord(state.f_level);
+    if ($('f-level-value')) $('f-level-value').classList.toggle('small', words);
+    if ($('f-level-unit')) $('f-level-unit').hidden = words;
+
+    // Model zbiornika (strona Dokarmiaczka): części od dołu – 1 część = żaden czujnik nie widzi cieczy (15 %)
+    const n = feederSensors(state.f_level);
+    if ($('f-level-label')) $('f-level-label').textContent = words ? feederWord(state.f_level) : withUnit('f_level', '%');
+    if (tankPending && n !== null && $('dokarmiaczka') && $('dokarmiaczka').classList.contains('active')) {
+      tankPending = false;
+      fillTank(n) || document.querySelectorAll('#feeder-tank .tank-seg').forEach((seg, i) => seg.classList.toggle('is-on', i <= n));
+    } else if (!tankAnimating) {
+      document.querySelectorAll('#feeder-tank .tank-seg').forEach((seg, i) => seg.classList.toggle('is-on', n !== null && i <= n));
+    }
+    if ($('f-level-desc')) {
+      $('f-level-desc').textContent = n === null ? 'Brak odczytu z czujników cieczy.'
+        : n === 0 ? 'Żaden z trzech czujników nie wykrywa cieczy.'
+        : 'Ciecz wykrywa ' + n + ' z 3 czujników.';
+    }
+    if ($('dash-feeder-compact')) {
+      $('dash-feeder-compact').textContent = text;
+      $('dash-feeder-compact').classList.toggle('is-long', text.length > 12);
+    }
     if ($('dash-feeder-caption')) $('dash-feeder-caption').textContent = caption;
   }
 
@@ -1029,8 +1101,6 @@
       if (el) el.textContent = format(k, state[k]);
     });
 
-    window.BEENest.setBar('feeder-bar', state.f_level);
-    window.BEENest.setBar('outlet-bar', state.o_position, 'o-position-label');
 
     if ($('m-status')) {
       $('m-status').textContent = CAMERA_NAMES[settings.camera] + (state.m_status ? ' · ' + state.m_status : '');
@@ -1255,6 +1325,161 @@
     });
     modalClose();
     if (r.value === 'settings') location.hash = '#ustawienia';
+  }
+
+  /* ===== 14f. WYLOTEK: przyciski, okno „Sterowanie wylotkiem” (suwak na żywo + reguły o godzinie) ===== */
+  // Serwer: POST /api/wylotek {pozycja}, GET/POST /api/wylotek/reguly (app.py). Uprawnienia: data-admin w main.html.
+  const OUTLET_SEND_EVERY = 150;     // ms – suwak wysyła pozycję najwyżej tak często (serwo i tak jedzie płynnie)
+
+  async function moveOutlet(value) {
+    state.o_position = value;
+    state.o_status = value <= 5 ? 'Zablokowany' : value >= 95 ? 'Otwarty' : 'W ruchu';
+    render();
+    try { await postJSON('/api/wylotek', { pozycja: value }); }
+    catch (e) { showPopup(e.message, 5000, false); poll(); }
+  }
+  $('btn-outlet-open').addEventListener('click', () => moveOutlet(100));
+  $('btn-outlet-close').addEventListener('click', () => moveOutlet(0));
+  $('btn-outlet-panel').addEventListener('click', () => openOutlet());
+  if ($('btn-outlet-settings')) $('btn-outlet-settings').addEventListener('click', () => openOutlet());
+
+  // Klawiatura numeryczna nad oknem: „wyrasta” z klikniętej wartości (przybliżenie). kind: 'pozycja' | 'godzina'
+  function numpad(from, kind, current) {
+    return new Promise(resolve => {
+      const layer = document.createElement('div');
+      layer.className = 'numpad-layer';
+      const pad = document.createElement('div');
+      pad.className = 'numpad';
+      layer.appendChild(pad);
+      pad.innerHTML = '<div class="numpad-title"></div><div class="numpad-display"></div>' +
+        '<div class="pin-pad">' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => '<button type="button" data-key="' + d + '">' + d + '</button>').join('') +
+        '<button type="button" data-key="anuluj" class="pin-side">Anuluj</button><button type="button" data-key="0">0</button>' +
+        '<button type="button" data-key="usun" class="pin-side" aria-label="Usuń ostatnią cyfrę"><svg viewBox="0 0 24 24"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg></button></div>' +
+        '<button type="button" class="back-btn btn-primary numpad-ok">Zatwierdź</button>';
+      pad.querySelector('.numpad-title').textContent = kind === 'godzina' ? 'Godzina' : 'Otwarcie wylotka';
+      const display = pad.querySelector('.numpad-display'), ok = pad.querySelector('.numpad-ok');
+      let digits = '';
+      const value = () => {
+        if (kind === 'godzina') {
+          if (digits.length !== 4 || +digits.slice(0, 2) > 23 || +digits.slice(2) > 59) return null;
+          return digits.slice(0, 2) + ':' + digits.slice(2);
+        }
+        return digits === '' || +digits > 100 ? null : +digits;
+      };
+      const paint = () => {
+        if (kind === 'godzina') {
+          const d = (digits + '----').slice(0, 4);
+          display.textContent = digits ? d.slice(0, 2) + ':' + d.slice(2) : current;
+        } else {
+          display.textContent = (digits || current) + ' %';
+        }
+        display.classList.toggle('is-placeholder', !digits);
+        ok.disabled = !!digits && value() === null;
+      };
+      const close = result => {
+        layer.classList.remove('open');
+        setTimeout(() => layer.remove(), 400);
+        resolve(result);
+      };
+      layer.addEventListener('click', e => { if (e.target === layer) close(null); });
+      pad.addEventListener('click', e => {
+        const key = e.target.closest('[data-key]');
+        if (e.target.closest('.numpad-ok')) { close(digits ? value() : null); return; }
+        if (!key) return;
+        const k = key.dataset.key;
+        if (k === 'anuluj') { close(null); return; }
+        if (k === 'usun') { digits = digits.slice(0, -1); paint(); return; }
+        const next = digits + k;
+        if (kind === 'godzina' ? next.length > 4 : (next.length > 3 || +next > 100)) return;
+        digits = kind === 'godzina' ? next : String(+next);    // procent bez zer na początku („05” = 5)
+        paint();
+      });
+      // Przybliżenie: klawiatura rośnie od środka klikniętej wartości (offsetLeft/Top – położenie bez skalowania)
+      paint();
+      document.body.appendChild(layer);
+      const f = from.getBoundingClientRect();
+      pad.style.transformOrigin = (f.left + f.width / 2 - pad.offsetLeft) + 'px ' + (f.top + f.height / 2 - pad.offsetTop) + 'px';
+      requestAnimationFrame(() => requestAnimationFrame(() => layer.classList.add('open')));
+    });
+  }
+
+  async function openOutlet() {
+    const box = document.createElement('div');
+    box.className = 'quick';
+    // Suwak: pozycja jedzie do serwa w trakcie przesuwania (co OUTLET_SEND_EVERY ms) i na koniec
+    const wrap = document.createElement('div');
+    wrap.className = 'range-box';
+    wrap.innerHTML = '<input type="range" class="range" min="0" max="100" step="1" aria-label="Otwarcie wylotka"><span class="range-value"></span>';
+    const range = wrap.querySelector('input'), out = wrap.querySelector('span');
+    range.value = isNum(state.o_position) ? Math.round(state.o_position) : 0;
+    out.textContent = range.value + ' %';
+    let lastSent = 0, pending = null;
+    const send = () => { lastSent = Date.now(); pending = null; moveOutlet(+range.value); };
+    range.addEventListener('input', () => {
+      out.textContent = range.value + ' %';
+      clearTimeout(pending);
+      const wait = OUTLET_SEND_EVERY - (Date.now() - lastSent);
+      if (wait <= 0) send(); else pending = setTimeout(send, wait);
+    });
+    range.addEventListener('change', () => { clearTimeout(pending); send(); });
+    box.appendChild(quickRow('Otwarcie wylotka', wrap));
+
+    // Reguły: „Ustaw na x % o GG:MM” – zapis na serwerze po każdej zmianie
+    let rules = [], max = 6;
+    const list = document.createElement('div');
+    list.className = 'rules';
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'rule-add';
+    add.textContent = '+ Dodaj regułę otwarcia';
+    const err = document.createElement('div');
+    err.className = 'pin-error';
+    const save = async () => {
+      try { err.textContent = ''; rules = (await postJSON('/api/wylotek/reguly', { reguly: rules })).reguly; }
+      catch (e) { err.textContent = e.message; }
+      paintRules();
+    };
+    const paintRules = () => {
+      list.innerHTML = '';
+      rules.forEach((r, i) => {
+        const row = document.createElement('div');
+        row.className = 'rule-row';
+        row.innerHTML = '<span>Ustaw na</span><button type="button" class="rule-value" data-k="pozycja"></button>' +
+          '<span>o</span><button type="button" class="rule-value" data-k="godzina"></button>' +
+          '<button type="button" class="rule-delete">Kasuj warunek</button>';
+        row.querySelector('[data-k="pozycja"]').textContent = r.pozycja + ' %';
+        row.querySelector('[data-k="godzina"]').textContent = r.godzina;
+        row.querySelectorAll('.rule-value').forEach(btn => btn.addEventListener('click', async () => {
+          const k = btn.dataset.k;
+          btn.classList.add('is-zoom');
+          const v = await numpad(btn, k, String(r[k]));
+          btn.classList.remove('is-zoom');
+          if (v === null || v === r[k]) return;
+          rules[i] = Object.assign({}, r, { [k]: v });
+          save();
+        }));
+        row.querySelector('.rule-delete').addEventListener('click', () => { rules.splice(i, 1); save(); });
+        list.appendChild(row);
+      });
+      add.hidden = rules.length >= max;
+    };
+    add.addEventListener('click', () => {
+      if (rules.length >= max) return;
+      rules.push({ godzina: '08:00', pozycja: 100 });
+      save();
+    });
+    const rulesBox = document.createElement('div');
+    rulesBox.className = 'rules-box';
+    rulesBox.append(list, add, err);
+    box.appendChild(quickRow('Reguły otwarcia', rulesBox));
+    getJSON('/api/wylotek/reguly').then(d => { rules = d.reguly || []; max = d.najwiecej || 6; paintRules(); })
+      .catch(e => { err.textContent = e.message; });
+    paintRules();
+
+    await askModal({ icon: false, wide: true, title: 'Sterowanie wylotkiem', content: box,
+      buttons: [{ label: 'Zamknij', value: 'cancel', kind: 'primary' }] });
+    clearTimeout(pending);
+    modalClose();
   }
 
   /* ===== 15. EKRAN PRZY ULU: jasność i uśpienie (animacja jak gaszenie starego telewizora) ===== */
@@ -1895,9 +2120,14 @@
     });
     if (!ok) return;
     modalBusy('usb', 'Zapisuję Klucz…', 'Nie wyjmuj pendrive\'a.');
-    try { await postJSON('/api/klucz/utworz', { pendrive: stick.nazwa }); }
+    let res;
+    try { res = await postJSON('/api/klucz/utworz', { pendrive: stick.nazwa }); }
     catch (e) { await noticeDialog({ icon: 'alert', danger: true, title: 'Nie udało się utworzyć Klucza', text: e.message }); return; }
-    await noticeDialog({ icon: 'check', title: 'Klucz utworzony', text: 'Dopóki ten pendrive jest wpięty, panel ma uprawnienia administratora. Przechowuj go w bezpiecznym miejscu.' });
+    // Serwer po zapisie bezpiecznie odłącza pendrive (safe_eject w app.py) – inaczej tani pendrive gubił zapis
+    await noticeDialog({ icon: 'check', title: 'Klucz utworzony', text: (res && res.odlaczony
+      ? 'Pendrive został bezpiecznie odłączony – wyjmij go. Po ponownym wpięciu panel ma uprawnienia administratora.'
+      : 'Odczekaj kilka sekund przed wyjęciem pendrive\'a. Dopóki jest wpięty, panel ma uprawnienia administratora.')
+      + '\nPrzechowuj go w bezpiecznym miejscu.' });
   }
 
   async function keyDuplicate() {
@@ -1921,9 +2151,13 @@
     });
     if (!ok) { cancel(); return; }
     modalBusy('usb', 'Kopiuję Klucz…', 'Nie wyjmuj pendrive\'a.');
-    try { await postJSON('/api/klucz/duplikuj/zapisz', { pendrive: stick.nazwa }); }
+    let res;
+    try { res = await postJSON('/api/klucz/duplikuj/zapisz', { pendrive: stick.nazwa }); }
     catch (e) { await noticeDialog({ icon: 'alert', danger: true, title: 'Nie udało się skopiować Klucza', text: e.message }); return; }
-    await noticeDialog({ icon: 'check', title: 'Kopia Klucza utworzona', text: 'Oba pendrive\'y działają jako Klucz. Unieważnienie Klucza wyłącza wszystkie kopie naraz.' });
+    await noticeDialog({ icon: 'check', title: 'Kopia Klucza utworzona', text: (res && res.odlaczony
+      ? 'Pendrive został bezpiecznie odłączony – możesz go wyjąć.'
+      : 'Odczekaj kilka sekund przed wyjęciem pendrive\'a.')
+      + '\nOba pendrive\'y działają jako Klucz. Unieważnienie Klucza wyłącza wszystkie kopie naraz.' });
   }
 
   async function keyRevoke() {

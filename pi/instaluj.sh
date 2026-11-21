@@ -53,8 +53,9 @@ kiosk_config() {
     cat > "$KIOSK_CONF/autostart" <<EOF
 # BEENest – sesja kiosku: tylko przeglądarka z panelem ula
 /usr/bin/kanshi &
-# Logo jako tło, zanim Chromium wczyta panel (Plymouth znika już ok. 7 s po starcie, panel jest ok. 14 s)
-/usr/bin/swaybg -c '#000000' -m fit -i /usr/share/plymouth/themes/beenest/splash.png &
+# Logo jako tło, zanim Chromium wczyta panel (Plymouth znika już ok. 7 s po starcie, panel jest ok. 14 s);
+# pi/tlo.sh bierze logo w kolorach motywu wyświetlacza (data/logo.png od serwera)
+/bin/sh $PI_DIR/tlo.sh &
 /usr/bin/lwrespawn /bin/sh $PI_DIR/kiosk.sh &   # przez sh – działa bez prawa wykonywania pliku
 EOF
     local layout options keys mouse
@@ -187,6 +188,12 @@ polkit.addRule(function(action, subject) {
     if (action.id == "org.freedesktop.NetworkManager.settings.modify.system" && subject.user == "$USER_NAME") {
         return polkit.Result.YES;
     }
+    // Klucz: sesja kiosku nie montuje pendrive'ów sama – serwer robi to przez udisksctl (app.py, usb_automount),
+    // a po zapisie Klucza bezpiecznie go odłącza (safe_eject: power-off – inaczej pendrive gubił zapis)
+    if ((action.id.indexOf("org.freedesktop.udisks2.filesystem-mount") == 0 ||
+         action.id.indexOf("org.freedesktop.udisks2.power-off-drive") == 0) && subject.user == "$USER_NAME") {
+        return polkit.Result.YES;
+    }
 });
 EOF
 
@@ -226,7 +233,7 @@ systemctl restart beenest.service
 #  4. Kiosk: osobna sesja – tylko Chromium z panelem ula, bez pulpitu
 # -------------------------------------------------------------
 say "Kiosk"
-chmod +x "$PI_DIR/kiosk.sh"
+chmod +x "$PI_DIR/kiosk.sh" "$PI_DIR/tlo.sh"
 # Pierwsza wersja tego skryptu dopisywała kiosk do autostartu pulpitu – sprzątamy
 grep -qs "BEENest" "$USER_LABWC/autostart" && rm -f "$USER_LABWC/autostart"
 cat > /usr/local/bin/beenest-kiosk <<EOF
@@ -280,7 +287,9 @@ say "Logo startowe"
 THEME=/usr/share/plymouth/themes/beenest
 mkdir -p "$THEME"
 cp /usr/share/plymouth/themes/pix/pix.script "$THEME/beenest.script"
-cp "$PI_DIR/logo-startowe.png" "$THEME/splash.png"
+# Logo w kolorach motywu wyświetlacza, jeśli serwer już je przygotował (data/logo.png), inaczej oryginał
+if [ -s "$APP_DIR/data/logo.png" ]; then cp "$APP_DIR/data/logo.png" "$THEME/splash.png"
+else cp "$PI_DIR/logo-startowe.png" "$THEME/splash.png"; fi
 cat > "$THEME/beenest.plymouth" <<EOF
 [Plymouth Theme]
 Name=beenest
@@ -304,7 +313,40 @@ if command -v rpi-eeprom-config >/dev/null && rpi-eeprom-config | grep -q "^NET_
 fi
 if [ "$(plymouth-set-default-theme)" != beenest ]; then
     plymouth-set-default-theme -R beenest    # przebudowuje initramfs (chwilę trwa)
+elif ! cmp -s "$THEME/splash.png" /usr/share/plymouth/themes/beenest/.w-initramfs 2>/dev/null; then
+    update-initramfs -u                      # Plymouth czyta logo z initramfs – nowe logo wchodzi po przebudowie
 fi
+cp "$THEME/splash.png" "$THEME/.w-initramfs"  # co jest teraz w initramfs (żeby nie przebudowywać bez potrzeby)
+# Zmiana motywu na wyświetlaczu = nowe data/logo.png (serwer, update_boot_logo). Usługa beenest-logo (root)
+# kopiuje je do motywu Plymouth i przebudowuje initramfs (około minuty, w tle). Tło kiosku (pi/tlo.sh) bierze je od razu.
+cat > /usr/local/bin/beenest-logo <<SKRYPT
+#!/bin/sh
+SRC="$APP_DIR/data/logo.png"
+DST="$THEME/splash.png"
+[ -s "\$SRC" ] || exit 0
+cmp -s "\$SRC" "$THEME/.w-initramfs" && exit 0       # to logo już jest w initramfs – bez przebudowy
+head -c 8 "\$SRC" | grep -q PNG || exit 1            # tylko prawdziwy PNG
+cp "\$SRC" "\$DST.tmp" && mv "\$DST.tmp" "\$DST"
+update-initramfs -u && cp "\$DST" "$THEME/.w-initramfs"
+SKRYPT
+chmod 755 /usr/local/bin/beenest-logo
+cat > /etc/systemd/system/beenest-logo.service <<SKRYPT
+[Unit]
+Description=BEENest – logo startowe w kolorach motywu wyświetlacza
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/beenest-logo
+SKRYPT
+cat > /etc/systemd/system/beenest-logo.path <<SKRYPT
+[Unit]
+Description=BEENest – czeka na nowe logo startowe od serwera
+[Path]
+PathChanged=$APP_DIR/data/logo.png
+[Install]
+WantedBy=multi-user.target
+SKRYPT
+systemctl daemon-reload
+systemctl enable --now beenest-logo.path
 
 # -------------------------------------------------------------
 #  6. Blokada (tylko z --blokada): klawiatura przy ulu nie da terminala ani pulpitu

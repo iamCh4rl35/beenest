@@ -90,6 +90,23 @@ Przy zimnym starcie użytkownik widział tylko czarny ekran ~10 s (logo tylko pr
 budzi się za późno na krótkie okno Plymoutha). Rozwiązanie: `swaybg -m fit -i .../beenest/splash.png`
 jako tło w autostarcie kiosku (swaybg jest w systemie). Wdrożone i po zimnym starcie swaybg działa od
 startu sesji (Plymouth 3,4–6,8 s, Chromium 12,8 s); użytkownik potwierdził: logo widać aż do panelu.
+* **Biały błysk po logo (2026-11-21, naprawione):** dwie przyczyny, zmierzone zrzutami `grim -t ppm -s 0.05` co 0,1 s
+podczas `pkill -x chromium` (skrypt w stylu: średnia jasność klatek). 1) `<body data-theme="bialy-pylek">` na sztywno
+w `main.html`, ciemny motyw nakładał dopiero app.js + przejście `background .3s` → ~0,6 s bieli. Teraz serwer wpisuje
+`data-theme`, `data-contrast`, `data-urzadzenie` w szablonie. 2) Puste okno Chromium przed pierwszą klatką (~0,1–0,2 s)
+ma kolor motywu GTK (PiXflat = biały); `--force-dark-mode` i `--default-background-color` NIE pomagają.
+`kiosk.sh` czyta `theme` z `[urzadzenie 127.0.0.1]` i ustawia `GTK_THEME=Adwaita:dark` (ciemne motywy) / `Adwaita`.
+Motyw GTK obowiązuje od następnego startu Chromium. Chromium nadpisuje `/proc/<pid>/environ` – zmiennych tak nie sprawdzisz.
+* **Logo startowe w kolorach motywu wyświetlacza** (2026-11-21): `BOOT_LOGO_COLORS` w `app.py` (tło, „BEE”, „NEST” –
+zmierzone z CSS wyświetlacza, 4 motywy × kontrast). `update_boot_logo()` (start serwera + zmiana `theme`/`highContrast`
+z wyświetlacza) woła `pi/logo.py` (przekolorowanie `pi/logo-startowe.png`, sama biblioteka standardowa; piksel =
+mieszanka czerni, bieli i pomarańczu → udziały z kanałów B i R−B; wariant czarny = oryginał co do bajtu)
+→ `data/logo.png` + `logo.kolor` + `logo.motyw`. Tło kiosku: `pi/tlo.sh` (swaybg z `data/logo.png`).
+Plymouth czyta logo z **initramfs** → `beenest-logo.path` (PathChanged na `data/logo.png`) uruchamia
+`/usr/local/bin/beenest-logo` (root): kopiuje do motywu i `update-initramfs -u`; `.w-initramfs` = co jest w initramfs.
+Wymaga `instaluj.sh` (autostart kiosku, jednostki systemd). Ekranu firmware/EEPROM przed Plymouthem nie da się zmienić.
+* **Zgaszenie ekranu zahasłowuje panel** (2026-11-21): `POST /api/ekran/uspij` z wyświetlacza zeruje `admin_until`
+(każde uśpienie: ręczne, po 10 min, na prośbę telefonu, przy blokadzie). Wpięty Klucz dalej daje administratora.
 * Uwaga (niepoprawione): serwer startuje przed hotspotem, więc w logu „nie znalazłem adresu IP”
 i `beenest.local` nie jest rozgłaszane przez zeroconf; na hotspocie nazwę i tak rozwiązuje dnsmasq.
 * **Parowanie i adresy (2026-11-20):**
@@ -129,7 +146,12 @@ dla całego ruchu – danych komórkowych nie używa. Bez tej zgody domyślne s�
 tamtędy także panel (nie działa). Android nie dzieli ruchu przeglądarki według celu (iOS tak).
 Wniosek: samym ustawieniem hotspotu się nie da. Rozważane dalej: opcja 2 = prawdziwe łącze w ulu (modem LTE na USB albo druga karta Wi-Fi) – shared
 udostępni je telefonom; opcja 3 = Pi jako klient hotspotu telefonu.
-    * Serwer można zrestartować bez sudo: `pkill -f BEENest/app.py` (systemd `Restart=always` go podnosi).
+    * Serwer można zrestartować bez sudo: `pkill -f "[B]EENest/app.py"` (systemd `Restart=always` go podnosi).
+**Nawiasy `[B]` są ważne** – bez nich `pkill -f` w poleceniu `ssh ... '...'` zabija też własną powłokę SSH (kod 255).
+To samo na PC: lokalny serwer testowy zatrzymuj po numerze procesu z `ss -ltnp 'sport = :8077'`, nie `pkill -f app.py`.
+**Heredoki:** tekst wklejany przez `python3 - <<'EOF'` nie może zawierać linijki `EOF` (bash kończy wtedy skrypt
+i resztę wykonuje sam – tak próbował uruchomić na PC fragment `instaluj.sh`). Dłuższe zmiany: skrypt do pliku w scratchpadzie.
+Testy na PC zapisują `data/global.conf` – kopia przed testem i przywrócenie po nim.
     * Zgłoszonego błędu „trzeba podać inną nazwę, żeby sparować ponownie” nie odtworzyłem (dziennik na Pi
 nie jest trwały – tylko bieżące uruchomienie); w kodzie nie było sprawdzania unikalności nazw.
 * **Energooszczędność i kafelki (2026-11-20):**
@@ -209,6 +231,7 @@ python3 app.py                       # port 80 (działa http://beenest.local), g
 BEENEST\_PORT=8080 python3 app.py     # własny port
 BEENEST\_DEBUG=1 python3 app.py       # auto-reload, port 8000
 BEENEST\_CAMERA\_DEMO=1 python3 app.py # kamera bez sprzętu
+BEENEST\_CZUJNIKI\_DEMO=1 python3 app.py # czujniki z danymi przykładowymi (na komputerze włącza się samo)
 python3 app.py --ustaw-pin           # PIN administratora (6 cyfr), działa też przy uruchomionym serwerze
 BEENEST\_BEZ\_ZABEZPIECZEN=1 python3 app.py  # testy: każdy jest administratorem
 BEENEST\_USB=/katalog python3 app.py # testy Klucza: każdy podkatalog udaje pendrive
@@ -234,7 +257,9 @@ static/chart.js                 window.BeeChart – własny wykres SVG (bez bibl
 static/qr.js                    window.BeeQR – własny generator kodów QR (bajty, poziom M, wersje 1–10)
 static/style.css                motywy, układ, animacje
 \*\_detector\_driver.py            po jednym na czujnik: read() -> {klucz: float | None}, KEYS = krotka kluczy
-buzzer\_driver.py                pusty (do zrobienia)
+hardware.py                     wspólne dla sterowników: DEMO, GPIO (pinctrl), PWM (/sys/class/pwm), I2C (/dev/i2c-1)
+buzzer\_driver.py                alarm() / beep() – buzzer pasywny, PWM0 kanał 1 (GPIO13)
+ir\_driver.py                    naświetlacze IR (GPIO23), włącza je camera\_detector\_driver przy kamerze internal
 data/beenest.db                 powstaje sam: tabela readings(ts, key, value) + kv (stan, np. f\_last)
 data/global.conf                powstaje sam: wszystkie ustawienia (patrz niżej)
 data/secret.key                 powstaje sam: klucz podpisujący ciasteczka (nowy = telefony do ponownego parowania)
@@ -242,11 +267,53 @@ data/secret.key                 powstaje sam: klucz podpisujący ciasteczka (now
 
 `data/` jest w `.gitignore`.
 
-Sterowniki to na razie **szkielety z danymi demonstracyjnymi** (atmosfera, samopoczucie, dokarmiaczka,
-wylotek). Kamera (`camera\_detector\_driver.py`) działa naprawdę przez picamera2 / libcamera (MJPEG),
+**Sterowniki (2026-11-21) czytają prawdziwy sprzęt** według „łączenia czujników.txt”, tylko biblioteką standardową
+(bez smbus2 / bme280 / gpiozero – zakomentowane importy zniknęły): atmosfera = 2 × BME280 przez `hardware.I2C`
+(tryb forced, wzory Boscha; BMP280 też, bez wilgotności; jeden brakujący czujnik = None w jego polach, oba = wyjątek),
+dokarmiaczka = 3 × XKC-Y25-V (`pinctrl`, `LIQUID_IS_HIGH`),
+samopoczucie = ICS43434 przez `arecord` (48 kHz S32 stereo, lewy kanał, 1 s; dB = dBFS + 120; FFT w Pythonie po
+uśrednieniu do 8 kHz, szczyt 50–1000 Hz), wylotek = serwo MG-996R (`set_position(%)`, pozycja zapisana w
+`data/wylotek`, impulsy gasną po ruchu – `HOLD`; kalibracja `PULSE_BLOCKED_US` / `PULSE_OPEN_US`; strona nie ma jeszcze
+przycisków). Sprawdzone na danych wzorcowych (Bosch: 25,08 °C / 100 653 Pa; ton 240 Hz) i na Pi bez czujników.
+**Tryb demonstracyjny:** sam na komputerze (brak `/proc/device-tree`) albo `BEENEST_CZUJNIKI_DEMO=1`.
+Na Pi do podłączenia potrzebne w `/boot/firmware/config.txt` (sudo, jeszcze NIE dopisane):
+`dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4` (serwo + buzzer) i `dtoverlay=adau7002-simple` (mikrofon).
+Bez nich sterowniki zgłaszają w dzienniku, co dopisać. Na Pi brak `i2c-tools` (`i2cdetect`).
+Kamera (`camera\_detector\_driver.py`) działa naprawdę przez picamera2 / libcamera (MJPEG),
 dwie kamery: `external` (CAM0) i `internal` (CAM1).
 Progi samopoczucia (`WELLBEING\_\*\_HZ`, `WELLBEING\_MAX\_DB`) są w `wellbeing\_detector\_driver.py`;
 używa ich `wellbeing\_status` w `app.py` i linie stref na wykresie.
+
+### Dokarmiaczka (2026-11-21)
+
+* Poziom z 3 czujników cieczy: wszystkie widzą ciecz = 100 %, dwa = 80 %, jeden = 40 %, żaden = 15 %
+(`LEVEL_PERCENT` w `feeder_detector_driver.py`). **Masa pokarmu usunięta z programu** (`f_weight` nie istnieje –
+polecenie użytkownika; w bazie na Pi mogą zostać stare wiersze `f_weight` z danych demonstracyjnych).
+* Ustawienie urządzenia `feederWords` (domyślnie tak, Wygląd → „Słowny stan dokarmiaczki”): słowa zamiast %:
+Pełny / Zapas płynu / Połowa zbiornika / Wymaga napełnienia (`FEEDER_WORDS`, `feederSensors()` w app.js – progi 90/60/28).
+* Strona Dokarmiaczka: model zbiornika `#feeder-tank` (opis po lewej, pionowy prostokąt 140×176 px z 4 częściami,
+bez „czubka” baterii – poprawka użytkownika). Zapalone części = czujniki + 1. Przy wejściu na stronę części
+zapalają się od dołu w 0,5 s (`fillTank`, `TANK_FILL_MS`). Poprzedni pasek `#feeder-bar` usunięty.
+* Kafelek na stronie głównej: napis dłuższy niż 12 znaków dostaje `.card-status.is-long` (mniejsza czcionka, jedna
+linijka) – „Wymaga napełnienia” w dwóch linijkach rozpychał menu główne na 1024×600 (pasek przewijania na Pi).
+
+### Wylotek (2026-11-21)
+
+* Strona: model zasuwy `#outlet-door` (SVG: otwór = koło r=44, zasuwa = kwadrat 88 przesuwany `translateX(-88·p/100)`;
+100 % = kwadrat dotyka koła jednym punktem, 0 % = zakrywa; obrys koła ciągłą linią nad zasuwą). Otwór
+`color-mix(var(--black) 82%, karta)` = ciemny w jasnych motywach, jasny w ciemnych. Pasek procentowy usunięty.
+Przyciski w lewym dolnym rogu panelu (`.door-actions`, `data-admin`): Otwórz (100), Zablokuj (0), Sterowanie.
+* Okno „Sterowanie wylotkiem” (`openOutlet()`, sekcja 14f `app.js`): suwak 0–100 na żywo (wysyła najwyżej co
+`OUTLET_SEND_EVERY` = 150 ms + na koniec), reguły „Ustaw na x % o GG:MM / Kasuj warunek”, najwyżej 6 (`OUTLET_MAX_RULES`).
+Klik w wartość = klawiatura numeryczna `numpad()` w osobnej warstwie `.numpad-layer` (z-index 205: nad oknem 200,
+pod PIN-em 210; w karcie okna `backdrop-filter` więziłby `position: fixed`), wyrasta z klikniętej wartości.
+* Ustawienia: **czwarta zakładka „Wylotek”** (w Działaniu na 1024×600 nie było miejsca – kolumny 501 i 474 px przy
+~493 dostępnych). Na telefonie dok ustawień bez ikon (4 kategorie w jednym rzędzie).
+* Serwer: `POST /api/wylotek {pozycja}` (administrator) → `move_outlet()`; `GET/POST /api/wylotek/reguly`;
+reguły w `global.conf` `[wylotek]` (`regulaN = GG:MM procent`); `run_outlet_rules()` w `sample_once` (co 5 s,
+każda minuta raz). Sterownik: `set_position()` nie czeka – impulsy gasną `MOVE_SECONDS` po ostatniej komendzie.
+* Panel zbiornika (Dokarmiaczka) i panel zasuwy zajmują resztę ekranu (`flex: 1`); zbiornik rośnie z panelem
+(`aspect-ratio 140/176`, 176–420 px wysokości).
 
 ### Strony (`#hash`)
 
@@ -264,6 +331,7 @@ wilgotność, ciśnienie, w ulu / na zewnątrz, min i maks z 24 godzin + wykres)
 |`GET /api/history?keys=a,b\&range=12h`|średnie do wykresów; zakresy 12h,1d,3d,7d,14d,30d,3m,6m (`CHART\_RANGES`)|
 |`GET /api/camera/<external\|internal>/stream`|MJPEG|
 |`GET/POST /api/settings`|odczyt / zmiana ustawień (JSON)|
+|`POST /api/wylotek`, `GET/POST /api/wylotek/reguly`|ruch zasuwy (0–100) i reguły otwarcia o godzinie (administrator)|
 |`POST /api/history/clear`|wymazuje historię atmosfery i samopoczucia (`HISTORY\_KEYS`) + VACUUM|
 |`POST /api/system/update`|`git pull`, opcjonalnie `{"reboot": true}`|
 |`POST /api/system/reboot`, `/shutdown`|zasilanie|
@@ -362,8 +430,10 @@ sterowanie przez `/sys/class/pwm` (biblioteka standardowa).
 
 ## Do zrobienia / otwarte
 
-* Prawdziwe odczyty czujników (BME280 ×2: 0x76 w ulu, 0x77 na zewnątrz; mikrofon + FFT; tensometr; serwo).
-* Sterowanie wylotkiem (na razie tylko podgląd stanu), `buzzer\_driver.py`.
+* Sterowniki napisane (2026-11-21) – do sprawdzenia po podłączeniu: kalibracja serwa, `LIQUID_IS_HIGH`,
+`TONE_HZ` buzzera, czy `pwm-2chan` na Pi 5 daje pwmchip `1f00098000.pwm`, nazwa karty mikrofonu (`arecord -l`).
+* Przyciski otwórz / zablokuj wylotek na stronie (sterownik ma już `set_position`).
+* SmartSolar: **na razie tylko sugestie, nie wdrażać** (polecenie użytkownika 2026-11-21).
 * **Zasilanie solarne (planowanie, 2026-11-19):** panel → Victron SmartSolar MPPT 75/15 → akumulator 22 Ah → Pi.
 Odczyt przez VE.Direct (tryb tekstowy, 19200 bodów, blok co 1 s; tylko biblioteka standardowa: `termios`),
 jako nowy sterownik w stylu `*\_detector\_driver.py`. Bluetooth (Instant Readout) jest możliwy, ale wymaga
@@ -380,7 +450,24 @@ wyjęcie, wpięcie drugiego pendrive'a. Wszystkie kopie mają ten sam sekret (un
     * Blokada 5 minut stała; okna blokady nie da się zamknąć na wyświetlaczu i telefonie użytkownika;
 telefon administratora może ją ukryć albo zdjąć. Blokada od razu zahasłowuje wyświetlacz.
     * Lista „Urządzenia” tylko z zapamiętanymi; korona = nadaj, przekreślona korona = odbierz.
-  * Do sprawdzenia na Pi: automatyczne montowanie pendrive'a w `/media/<użytkownik>/<nazwa>` (w trybie
-kiosku bez pulpitu może nie działać), `nmcli -s` musi mieć prawo odczytać hasło `Pi-hotspot`,
+  * **Pendrive'y montuje serwer** (2026-11-21): sesja kiosku nie ma automontowania (`/media` puste, konfigurator
+nie widział Klucza). `usb_automount()` w `usb_loop` co 1 s: `lsblk -J -l` (ta wersja zwraca płaską listę – dysk
+po `TRAN=usb`, partycje po `PKNAME`) → `udisksctl mount -b` → `/media/beenest/<nazwa>`; każda partycja raz do wyjęcia.
+Wymaga reguły polkit `org.freedesktop.udisks2.filesystem-mount*` (w `50-beenest.rules`, `instaluj.sh`).
+Testowy pendrive 64 GB (USB 2.0, NTFS na `sda2` + 200 MB bez systemu plików) w górnym USB3 = `xhci-hcd.1` port 1
+(magistrala 3, bo urządzenie USB 2.0). Akceptowany jest każdy port USB.
+Reguła polkit wgrana (użytkownik uruchomił `instaluj.sh`, 2026-11-21). **Testowy pendrive ma uszkodzony NTFS**:
+`ntfs3: failed to replay log file. Can't mount rw!` i przy `-o ro`: `$AttrDef is corrupted` → nie montuje się wcale.
+Serwer po nieudanym montowaniu próbuje jeszcze tylko do odczytu (wystarcza przy samym „brudnym” dzienniku NTFS).
+Na Klucz zalecany FAT32 / exFAT. Dziennik jądra czytelny bez sudo: `journalctl -k` (beenest jest w grupie adm).
+  * **Klucz „znikał” po wyjęciu** (2026-11-21): drugi pendrive (GPARTED-LIV, FAT, 8 GB) – Klucz zapisany, wyjęty po 6 s,
+po ponownym wpięciu nierozpoznany: plik `beenest.klucz` miał dobry rozmiar (65 B), ale treść = bajty 0xFF. Jądro zakłada
+„write through” (brak SYNCHRONIZE CACHE), a tani pendrive trzymał dane we własnej pamięci podręcznej. Naprawa:
+`safe_eject()` po zapisie Klucza / kopii = `udisksctl unmount` + `power-off` (wyłączenie zmusza pendrive do zapisu);
+`_usb["busy"]` wstrzymuje `usb_loop`, żeby odmontowanie nie wyglądało na wyjęcie (odebrałoby wyświetlaczowi PIN).
+Okno po zapisie: „Pendrive został bezpiecznie odłączony – wyjmij go”. Wymaga reguły polkit `power-off-drive*`
+(`instaluj.sh`); bez niej: montuje z powrotem i prosi o odczekanie. **Klucza z GPARTED-LIV trzeba utworzyć od nowa**
+(unieważnij + utwórz), bo zapisany skrót pasuje do sekretu, którego na pendrivie nie ma. Treści Klucza nie wypisuj.
+  * `nmcli -s` musi mieć prawo odczytać hasło `Pi-hotspot`,
 przeglądarka wyświetlacza w trybie `--kiosk` i schowane porty USB (obca klawiatura omija PIN).
   * Ustawienia urządzeń (`\[urzadzenie <adres IP>]`) nadal są przypisane do adresu IP, nie do ciasteczka.
