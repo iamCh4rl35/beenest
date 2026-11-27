@@ -1,0 +1,116 @@
+kamera zewnętrzna - CAM0
+kamera wewnętrzna - CAM1
+
+Nakładka: DFRobot IO Expansion HAT. Na nakładce są dwa numery: BCM i WPI (WiringPi).
+Poniżej "pin" = numer fizyczny złącza (1–40), GPIO = numer BCM, w nawiasie podpis na nakładce.
+
+
+=== PRZYDZIAŁ PINÓW ===
+
+pin 1, 17        3V3            BME280 x2 (VCC), mikrofon (VDD)
+pin 2, 4         5V             czujniki cieczy x3 (VCC); zasilanie Pi, jeśli nie przez USB-C
+pin 3            GPIO2  (SDA1)  BME280 x2 - SDA
+pin 5            GPIO3  (SCL1)  BME280 x2 - SCL
+pin 11           GPIO17 (IO0)   czujnik cieczy nr 1 (dół)
+pin 13           GPIO27 (IO2)   czujnik cieczy nr 2 (środek)
+pin 15           GPIO22 (IO3)   czujnik cieczy nr 3 (góra)
+pin 12           GPIO18 (IO1)   mikrofon - SCK
+pin 35           GPIO19 (IO24)  mikrofon - WS
+pin 38           GPIO20 (IO28)  mikrofon - SD
+pin 32           GPIO12 (IO26)  serwo - sygnał (sprzętowe PWM)
+pin 33           GPIO13 (IO23)  buzzer - przez tranzystor (sprzętowe PWM)
+pin 16           GPIO23 (IO4)   włączanie naświetlaczy (MOSFET)
+pin 10           GPIO15 (RXD)   SmartSolar - tylko jeśli bez kabla VE.Direct-USB
+pin 6, 9, 14, 20, 25, 30, 34, 39   GND   wspólna masa
+
+Uwaga: SDA i SCL to fizycznie piny 3 i 5. "9" i "8" przy SDA1 / SCL1 na nakładce to numery WiringPi.
+
+
+=== CZUJNIK TEMPERATURY nr 1 i nr 2 (BME280) ===
+    VCC - 3V3 (pin 1)
+    GND - GND
+    SDA - SDA1 (pin 3)
+    SCL - SCL1 (pin 5)
+    Oba na tych samych pinach, różne adresy:
+      nr 1 (w ulu):        0x76 - SDO do GND
+      nr 2 (na zewnątrz):  0x77 - SDO do 3V3 (na wielu płytkach zworka lutowana)
+    Przewód do czujnika zewnętrznego możliwie krótki (do ok. 1-2 m), najlepiej skrętka.
+
+
+=== CZUJNIKI CIECZY XKC-Y25-V (x3) ===
+    brązowy  - 5V
+    niebieski - GND
+    żółty (wyjście) - rezystor 1 kΩ - punkt wspólny - GPIO (pin 11 / 13 / 15)
+                      punkt wspólny - rezystor 2 kΩ - GND
+                      (dzielnik: 5 V z czujnika -> 3,33 V na GPIO)
+    czarny (tryb) - do brązowego albo niebieskiego: decyduje, czy wyjście jest wysokie przy cieczy, czy bez niej
+    Przed podłączeniem do GPIO zmierzyć miernikiem napięcie na wyjściu czujnika.
+    Trzy czujniki na różnych wysokościach = poziom dokarmiaczki w trzech progach.
+
+
+=== SERWO MG-996R 180 ===
+    czerwony     - osobna przetwornica 5-6 V, min. 3 A (NIE pin 5V Pi - przy zablokowaniu bierze do ok. 2,5 A)
+    brązowy      - GND tej przetwornicy, połączony z GND Pi
+    pomarańczowy - pin 32 (GPIO12)
+    Przy samym serwie kondensator elektrolityczny 470-1000 µF / 10 V między + a -.
+
+
+=== MIKROFON ICS43434 (I2S) ===
+    VDD - 3V3
+    GND - GND
+    SCK - pin 12 (GPIO18)
+    WS  - pin 35 (GPIO19)
+    SD  - pin 38 (GPIO20)
+    L/R - GND
+    Krótkie przewody (do ok. 20-30 cm) - mikrofon blisko Pi.
+
+
+=== BUZZER PASYWNY 23 mm (bez generatora, 1-40 V) ===
+    pin 33 (GPIO13) - rezystor 1 kΩ - baza tranzystora NPN (BC547 albo 2N2222)
+    emiter - GND
+    kolektor - minus buzzera
+    plus buzzera - +12 V (akumulator przez bezpiecznik) albo +5 V
+    równolegle do buzzera rezystor 1-2,2 kΩ
+    Ton z PWM ok. 2-4 kHz.
+
+
+=== SMARTSOLAR (VE.Direct) ===
+    Zalecane: izolowany kabel VE.Direct-USB do portu USB Pi.
+    Wersja na GPIO:
+      TX portu VE.Direct - pin 10 (GPIO15)
+      GND portu          - GND
+      pin zasilania portu - NIE podłączać
+      Najpierw zmierzyć napięcie na pinie zasilania portu:
+        5 V   -> ten sam dzielnik 1 kΩ / 2 kΩ jak przy czujnikach cieczy
+        3,3 V -> łączyć wprost
+      Wymaga włączenia portu szeregowego w config.txt (dtparam=uart0=on).
+
+
+=== NAŚWIETLACZE IR 3 W (x2, po obu stronach kamery) ===
+    Zasilanie zwykle 3,3 V - SPRAWDZIĆ na opisie płytek.
+    Przy oryginalnej kamerze otwory montażowe nie są zasilone - przewody lutować do pól + / - na płytkach naświetlaczy.
+    Dwie płytki biorą ponad 1 A - pin 3V3 Pi tego nie uciągnie:
+      osobna przetwornica 3,3 V, min. 2 A, zasilana z 12 V
+    Minus płytek przez MOSFET (logiczny, np. AO3400 albo IRLZ44N):
+      pin 16 (GPIO23) - rezystor 100 Ω - bramka
+      bramka - rezystor 10 kΩ - GND
+      źródło - GND, dren - minus naświetlaczy
+    Ul włącza je tylko na czas podglądu kamery (razem 6 W - tyle co całe Pi).
+
+
+=== ZASILANIE ===
+    Akumulator -> bezpiecznik -> przetwornica 5,1 V, min. 5 A -> USB-C Pi (bezpieczniej niż piny 2 / 4)
+    Bez zasilacza USB-PD Pi 5 daje portom USB tylko 600 mA; jeśli przetwornica naprawdę daje 5 A:
+      w EEPROM PSU_MAX_CURRENT=5000
+    Trzy przetwornice z 12 V, każda za osobnym bezpiecznikiem:
+      5,1 V / 5 A - Pi
+      5-6 V / 3 A - serwo
+      3,3 V / 2 A - naświetlacze
+    Wszystkie masy w jednym punkcie: minus akumulatora, przetwornice, Pi, serwo, SmartSolar
+    (masa VE.Direct = minus akumulatora).
+
+
+=== DO SPRAWDZENIA PRZED LUTOWANIEM ===
+    - napięcie na wyjściu czujników cieczy
+    - napięcie zasilania płytek naświetlaczy
+    - poziom sygnału portu VE.Direct (tylko przy wersji na GPIO)

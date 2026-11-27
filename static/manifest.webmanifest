@@ -1,0 +1,16 @@
+{
+  "name": "BEENest",
+  "short_name": "BEENest",
+  "description": "Panel inteligentnego ula",
+  "lang": "pl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "browser",
+  "background_color": "#FFFFFF",
+  "theme_color": "#FF8A00",
+  "icons": [
+    { "src": "icons/bee-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/bee-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/bee.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

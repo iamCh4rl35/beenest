@@ -5,13 +5,13 @@ BEENest – zakres kolorów na wyjściu HDMI (właściwość DRM „Broadcast RG
 Panel Waveshare 7" oczekuje zakresu ograniczonego 16–235, a Raspberry przy rozdzielczości 1024×600 wysyła
 pełny 0–255: panel ucina wtedy ciemne tony (czerń do ~40) i jasne (biel od ~232) – plansza testowa 2026-11-20.
 
-    python3 pi/hdmi_zakres.py              pokazuje obecne ustawienie
-    python3 pi/hdmi_zakres.py ograniczony  Limited 16:235
-    python3 pi/hdmi_zakres.py pelny        Full
-    python3 pi/hdmi_zakres.py auto         Automatic
+    python3 pi/hdmi_range.py          pokazuje obecne ustawienie
+    python3 pi/hdmi_range.py limited  Limited 16:235
+    python3 pi/hdmi_range.py full     Full
+    python3 pi/hdmi_range.py auto     Automatic
 
 Zmiana działa tylko wtedy, gdy nikt inny nie steruje ekranem (przed startem labwc) – dlatego woła ją
-sesja kiosku (/usr/local/bin/beenest-kiosk, patrz pi/instaluj.sh). Tylko biblioteka standardowa (ioctl DRM).
+sesja kiosku (/usr/local/bin/beenest-kiosk, patrz pi/install.sh). Tylko biblioteka standardowa (ioctl DRM).
 """
 import ctypes
 import fcntl
@@ -19,7 +19,7 @@ import glob
 import os
 import sys
 
-NAMES = {"ograniczony": "Limited 16:235", "pelny": "Full", "auto": "Automatic"}
+NAMES = {"limited": "Limited 16:235", "full": "Full", "auto": "Automatic"}
 PROPERTY = b"Broadcast RGB"
 CONNECTOR_TYPES = {11: "HDMI-A", 12: "HDMI-B"}
 OBJECT_CONNECTOR = 0xC0C0C0C0
@@ -91,7 +91,7 @@ def connectors(fd):
         con2 = GetConnector(connector_id=cid, props_ptr=_addr(props), prop_values_ptr=_addr(values),
                             count_props=con.count_props)
         fcntl.ioctl(fd, GETCONNECTOR, con2)
-        name = f"{CONNECTOR_TYPES.get(con2.connector_type, 'inne')}-{con2.connector_type_id}"
+        name = f"{CONNECTOR_TYPES.get(con2.connector_type, 'other')}-{con2.connector_type_id}"
         out.append((cid, name, con2.connection == 1, list(zip(props, values))))
     return out
 
@@ -113,7 +113,7 @@ def broadcast_rgb(fd, props):
 def main():
     want = sys.argv[1] if len(sys.argv) > 1 else None
     if want and want not in NAMES:
-        sys.exit("Użycie: hdmi_zakres.py [ograniczony | pelny | auto]")
+        sys.exit("Użycie: hdmi_range.py [limited | full | auto]")
     found = False
     for card in sorted(glob.glob("/dev/dri/card*")):
         fd = os.open(card, os.O_RDWR | os.O_CLOEXEC)

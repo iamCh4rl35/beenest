@@ -16,6 +16,15 @@ rm -f "$PROFILE/SingletonLock" "$PROFILE/SingletonSocket" "$PROFILE/SingletonCoo
 # Czekamy, aż serwer ula odpowie (po starcie systemu potrzebuje kilku sekund).
 until curl -s -o /dev/null http://127.0.0.1/; do sleep 1; done
 
+# Puste okno Chromium (zanim narysuje stronę) ma kolor z motywu GTK – domyślnie biały, co w ciemności
+# dawało „błysk” po logo. Motyw GTK dobieramy do motywu wyświetlacza z data/global.conf.
+CONF="$(dirname "$0")/../data/global.conf"
+THEME=$(sed -n '/^\[device 127\.0\.0\.1\]/,/^\[/s/^theme *= *//p' "$CONF" 2>/dev/null)
+case "$THEME" in
+  night-black|honey-grey) export GTK_THEME=Adwaita:dark ;;
+  *) export GTK_THEME=Adwaita ;;
+esac
+
 # --password-store=basic: bez okna z pytaniem o hasło do pęku kluczy (gnome-keyring).
 # Adres 127.0.0.1 (nie beenest.local) – tylko pętla zwrotna jest rozpoznawana jako wyświetlacz.
 exec chromium \

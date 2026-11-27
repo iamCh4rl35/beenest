@@ -48,7 +48,7 @@ textarea {
   --shadow: 0 4px 20px rgba(15, 15, 16, .04);
   --font: "Lexend", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
-  /* ===== ANIMACJE i WYKRESY – wartości ustawiasz w data/global.conf, sekcja [wyglad].
+  /* ===== ANIMACJE i WYKRESY – wartości ustawiasz w data/global.conf, sekcja [look].
      Te poniżej to tylko zapas, gdy strona jest otwarta bez serwera. ===== */
   --anim-duration: .4s;
   /* czas: przełącznik kamer/kategorii, listy, okna (większy = wolniej) */
@@ -77,7 +77,7 @@ textarea {
 
 /* Zmienne zależne od motywu liczone na <body>, żeby widziały jego kolor akcentu */
 body {
-  /* ===== HOVER KART w Menu Głównym – ustawiasz w data/global.conf, [wyglad]; tu tylko zapas ===== */
+  /* ===== HOVER KART w Menu Głównym – ustawiasz w data/global.conf, [look]; tu tylko zapas ===== */
   --hover-lift: -4px;
   /* o ile karta unosi się w górę (0 = wcale) */
   --hover-glow: 0 14px 36px color-mix(in srgb, var(--orange) 32%, transparent);
@@ -93,7 +93,7 @@ body {
 }
 
 /* ---------- MOTYWY ---------- */
-body[data-theme="lekki-miodek"] {
+body[data-theme="light-honey"] {
   --bg: #FFF8E7;
   --card-background: #FFFFFF;
   --black: #4A2F1A;
@@ -106,7 +106,7 @@ body[data-theme="lekki-miodek"] {
   --dock-border: rgba(255, 228, 181, 0.6);
 }
 
-body[data-theme="nocna-czern"] {
+body[data-theme="night-black"] {
   --bg: #000000;
   --card-background: #141414;
   --black: #FFFFFF;
@@ -120,7 +120,7 @@ body[data-theme="nocna-czern"] {
   --shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
 
-body[data-theme="miodna-szarosc"] {
+body[data-theme="honey-grey"] {
   --bg: #1A1408;
   --card-background: #2D2415;
   --black: #FFF3DC;
@@ -134,15 +134,50 @@ body[data-theme="miodna-szarosc"] {
   --shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
+/* Material You – tylko w aplikacji na Androida. Kolory (--m3-*) ustawia app.js z palety telefonu (sekcja 0a);
+   tu role motywu strony i zapas (Android 10–11 albo strona otwarta poza aplikacją). „Expressive”: większe
+   zaokrąglenia, przyciski w kształcie pigułki i sprężyste animacje. */
+body[data-theme="material-you"] {
+  --bg: var(--m3-surface, #FFFBFE);
+  --card-background: var(--m3-container, #F3EDF7);
+  --black: var(--m3-on-surface, #1D1B20);
+  --muted: var(--m3-on-surface-variant, #49454F);
+  --line: var(--m3-outline, #CAC4D0);
+  --orange: var(--m3-primary, #6750A4);
+  --orange-dark: var(--m3-primary-strong, #4F378B);
+  --orange-soft: var(--m3-primary-container, #EADDFF);
+  --dock-bg: color-mix(in srgb, var(--card-background) 75%, transparent);
+  --dock-border: color-mix(in srgb, var(--line) 60%, transparent);
+  --radius: 28px;
+  --anim-ease: cubic-bezier(.34, 1.3, .64, 1);
+}
+
+body[data-theme="material-you"][data-scheme="dark"] {
+  --shadow: 0 4px 20px rgba(0, 0, 0, .45);
+}
+
+body[data-theme="material-you"] :is(.btn-primary, .modal-btn.primary, .camera-dock-btn.active, .stat.primary,
+  .dd-option[aria-selected="true"]) {
+  color: var(--m3-on-primary, #FFFFFF);
+}
+
+body[data-theme="material-you"] :is(.modal-btn, .back-btn, .camera-dock-btn, .camera-dock) {
+  border-radius: 999px;
+}
+
+body[data-theme="material-you"] :is(.panel-card, .quad-tile, .modal-btn, .back-btn):active {
+  transform: scale(.97);
+}
+
 /* ---------- WYSOKI KONTRAST ---------- */
-body[data-contrast="high"][data-theme="bialy-pylek"] {
+body[data-contrast="high"][data-theme="white-pollen"] {
   --orange: #000000;
   --orange-dark: #000000;
   --orange-soft: #F0F0F0;
   --muted: #333333;
 }
 
-body[data-contrast="high"][data-theme="nocna-czern"] {
+body[data-contrast="high"][data-theme="night-black"] {
   --orange: #FFFFFF;
   --orange-dark: #FFFFFF;
   --orange-soft: #333333;
@@ -151,14 +186,14 @@ body[data-contrast="high"][data-theme="nocna-czern"] {
   /* tło włączonego przełącznika jest tu białe, więc kulka musi być czarna */
 }
 
-body[data-contrast="high"][data-theme="lekki-miodek"] {
+body[data-contrast="high"][data-theme="light-honey"] {
   --bg: #FFF2E0;
   --black: #1A1A1A;
   --line: #D6C5B3;
   --orange: #E65100;
 }
 
-body[data-contrast="high"][data-theme="miodna-szarosc"] {
+body[data-contrast="high"][data-theme="honey-grey"] {
   --bg: #000000;
   --black: #FFFFFF;
   --line: #555555;
@@ -191,17 +226,20 @@ body {
   transition: background .3s;
 }
 
+/* Logo = static/logo.svg (symbol #logo). Kolory napisu z motywu: „BEE” jak tekst, „Nest” jak akcent;
+   pszczółka ma stałe kolory. Zmienne przechodzą do środka <use>. */
 .logo {
-  font-size: clamp(26px, 3.5vw, 34px);
-  font-weight: 900;
-  letter-spacing: 2px;
-  color: var(--black);
-  text-decoration: none;
-  line-height: 1;
+  --logo-bee: var(--black);
+  --logo-nest: var(--orange);
+  display: block;
+  line-height: 0;
 }
 
-.logo span {
-  color: var(--orange);
+.logo svg {
+  display: block;
+  height: clamp(24px, 3.2vw, 32px);
+  width: auto;
+  aspect-ratio: 1521 / 261;
 }
 
 .datetime {
@@ -234,11 +272,54 @@ main {
   display: none;
   flex: 1;
   flex-direction: column;
-  animation: fade .22s ease backwards;   /* backwards, nie both: po animacji nie zostaje transform (psułby position:fixed wewnątrz strony) */
 }
 
 .page.active {
   display: flex;
+}
+
+/* Przejście między stronami (route() w app.js): otwierana karta wjeżdża z prawej, poprzednia zanika i maleje
+   ku środkowi; powrót do panelu głównego odwrotnie. Klasy znikają po animacji – transform zostawiony na stronie
+   psułby position:fixed w jej środku. */
+:root {
+  --page-duration: .4s;      /* = PAGE_TIME w app.js */
+}
+
+main {
+  position: relative;        /* odchodząca strona leży na czas animacji absolutnie w <main> */
+}
+
+main.is-turning {
+  overflow: hidden;          /* wjeżdżająca z prawej strona nie robi poziomego paska przewijania */
+}
+
+.page.page-leaving {
+  display: flex;
+  position: absolute;
+  pointer-events: none;
+}
+
+.page-leaving,
+.page-entering {
+  animation-duration: var(--page-duration);
+  animation-timing-function: cubic-bezier(.22, .8, .24, 1);
+  animation-fill-mode: both;
+}
+
+.from-right { animation-name: page-in-right; position: relative; z-index: 1; }
+.to-back    { animation-name: page-out-back; z-index: 0; }
+.from-back  { animation-name: page-in-back; }
+.to-right   { animation-name: page-out-right; z-index: 2; }
+
+@keyframes page-in-right  { from { transform: translateX(calc(100% + 40px)); } }
+@keyframes page-out-back  { to   { opacity: 0; transform: scale(.9); } }
+@keyframes page-in-back   { from { opacity: 0; transform: scale(.9); } }
+@keyframes page-out-right { to   { transform: translateX(calc(100% + 40px)); } }
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --page-duration: .01s;
+  }
 }
 
 @keyframes fade {
@@ -334,10 +415,6 @@ main {
   grid-template-columns: 1fr 1fr;
   grid-template-rows: auto 1fr;
   column-gap: 14px;
-}
-
-.panel-card.is-featured.single .temp-section {
-  grid-column: 1 / -1;
 }
 
 .panel-card.is-featured .card-header {
@@ -448,6 +525,12 @@ main {
   color: var(--orange);
 }
 
+/* Długi napis (np. „Wymaga napełnienia”) w jednej linijce – w dwóch rozpychał menu główne na 1024×600 */
+.card-status.is-long {
+  font-size: clamp(18px, 2.2vw, 22px);
+  white-space: nowrap;
+}
+
 .card-caption {
   margin-top: 4px;
   font-size: 12px;
@@ -486,24 +569,6 @@ main {
 
 .dash-card:hover::before {
   transform: scaleY(1);
-}
-
-.dash-card.monitoring {
-  justify-content: center;
-  align-items: center;
-  text-align: center;
-  font-size: clamp(26px, 3.5vw, 34px);
-  font-weight: 900;
-}
-
-.dash-card.monitoring .arrow {
-  color: var(--orange);
-  margin-left: 5px;
-  transition: transform .2s;
-}
-
-.dash-card.monitoring:hover .arrow {
-  transform: translateX(4px);
 }
 
 .dash-card.settings {
@@ -615,6 +680,258 @@ body[data-contrast="high"] .stat.primary .unit {
   font-size: 14.5px;
 }
 
+/* Dokarmiaczka: model zbiornika jak bateria – opis po lewej, pionowy zbiornik z 4 częściami po prawej.
+   Części zapala renderFeeder() w app.js od dołu (.tank-body ma odwróconą kolejność). */
+.tank-panel {
+  flex: 1;                   /* zajmuje resztę ekranu pod kafelkami (.page to kolumna flex) */
+  margin-bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.tank-info {
+  min-width: 0;
+}
+
+.tank-label {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tank-value {
+  margin-top: 6px;
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 900;
+  letter-spacing: -.6px;
+  line-height: 1.1;
+}
+
+.tank-desc {
+  margin-top: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.tank {
+  flex-shrink: 0;
+  align-self: stretch;       /* zbiornik rośnie razem z panelem */
+  display: flex;
+  align-items: center;
+}
+
+.tank-body {
+  height: 100%;
+  min-height: 176px;
+  max-height: 420px;
+  aspect-ratio: 140 / 176;   /* około 4 : 5 – szerszy niż bateria, ale wciąż pionowy */
+  padding: 6px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 6px;
+  border: 3px solid var(--line);
+  border-radius: 18px;
+}
+
+.tank-seg {
+  flex: 1;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--line) 60%, transparent);
+  transition: background var(--anim-duration);
+}
+
+.tank-seg.is-on {
+  background: var(--orange);
+}
+
+/* Stan wylotka: opis i przyciski po lewej (przyciski w lewym dolnym rogu), model zasuwy po prawej.
+   Zasuwę przesuwa renderOutlet() w app.js (transform w jednostkach viewBox). */
+.door-panel {
+  flex: 1;
+  margin-bottom: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.door-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.door-actions {
+  margin-top: auto;          /* do dołu panelu */
+  padding-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.door-actions .back-btn {
+  margin: 0;
+  font-family: inherit;
+}
+
+.door {
+  flex-shrink: 1;
+  align-self: center;
+  width: min(46%, 380px);
+  height: auto;
+  overflow: visible;
+}
+
+.door-hole {
+  fill: color-mix(in srgb, var(--black) 82%, var(--card-background));   /* ciemny w jasnych motywach, jasny w ciemnych */
+}
+
+.door-slide {
+  fill: var(--orange);
+  transition: transform var(--anim-duration) var(--anim-ease);
+}
+
+.door-outline {
+  fill: none;
+  stroke: var(--black);      /* na otworze zlewa się z nim, na zasuwie widać obrys koła */
+  stroke-width: 2.5;
+  opacity: .6;
+}
+
+.door.is-unknown .door-slide {
+  fill: var(--line);
+}
+
+/* Okno „Sterowanie wylotkiem”: reguły otwarcia */
+.rules-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rules {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.rule-value {
+  padding: 5px 12px;
+  border: 2px solid var(--orange);
+  border-radius: 10px;
+  background: var(--orange-soft);
+  color: var(--black);
+  font: 800 15px/1.2 var(--font);
+  cursor: pointer;
+  transition: transform var(--anim-duration) var(--anim-ease);
+}
+
+.rule-value.is-zoom {
+  transform: scale(1.25);
+}
+
+.rule-delete {
+  margin-left: auto;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #D32F2F;
+  font: 800 13px/1.2 var(--font);
+  cursor: pointer;
+}
+
+.rule-add {
+  align-self: flex-start;
+  padding: 7px 14px;
+  border: 2px dashed var(--orange);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--orange-dark);
+  font: 800 14px/1.2 var(--font);
+  cursor: pointer;
+}
+
+/* Klawiatura numeryczna nad oknem (osobna warstwa – w karcie okna backdrop-filter więziłby position:fixed).
+   Karta wyrasta z klikniętej wartości (transform-origin ustawia app.js). Nad oknem (200), pod PIN-em (210). */
+.numpad-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 205;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0);
+  transition: background var(--anim-duration) var(--anim-ease);
+}
+
+.numpad-layer.open {
+  background: rgba(0, 0, 0, .25);
+}
+
+.numpad {
+  width: min(100%, 340px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 24px;
+  border-radius: 28px;
+  background: var(--card-background);
+  border: 1px solid var(--dock-border);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .30);
+  transform: scale(.15);
+  opacity: 0;
+  transition: transform var(--anim-duration) var(--anim-ease), opacity var(--anim-duration) var(--anim-ease);
+}
+
+.numpad-layer.open .numpad {
+  transform: none;
+  opacity: 1;
+}
+
+.numpad-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.numpad-display {
+  font-size: 36px;
+  font-weight: 900;
+  letter-spacing: -.5px;
+}
+
+.numpad-display.is-placeholder {
+  opacity: .4;
+}
+
+.numpad .pin-pad {
+  max-width: 300px;
+}
+
+.numpad .numpad-ok {
+  align-self: center;        /* .back-btn (niżej w pliku) ma align-self: flex-start */
+  margin: 0;
+  min-width: 160px;
+  font-family: inherit;
+}
+
 .bar {
   height: 12px;
   margin-top: 12px;
@@ -676,13 +993,6 @@ body[data-contrast="high"] .stat.primary .unit {
 .back-btn:disabled {
   opacity: .55;
   cursor: progress;
-}
-
-/* Przyciski w ustawieniach (zasilanie, aktualizacja) */
-.btn-row {
-  display: flex;
-  gap: 10px;
-  width: 100%;
 }
 
 .btn-wide {
@@ -1917,8 +2227,8 @@ body[data-contrast="high"] .chart-line {
 /* Dock jedzie w lewy róg, przycisk zamknięcia pojawia się w prawym, "Wróć" znika */
 .page.cam-max .camera-dock {
   position: fixed;
-  top: 16px;
-  left: 16px;
+  top: calc(16px + var(--safe-top, 0px));     /* aplikacja: pod paskiem stanu i przednią kamerą telefonu */
+  left: calc(16px + var(--safe-left, 0px));
   z-index: 85;
   margin: 0;
 }
@@ -1931,8 +2241,8 @@ body[data-contrast="high"] .chart-line {
 
 .cam-close {
   position: fixed;
-  top: 16px;
-  right: 16px;
+  top: calc(16px + var(--safe-top, 0px));
+  right: calc(16px + var(--safe-right, 0px));
   z-index: 85;
   width: 46px;
   height: 46px;
@@ -2163,18 +2473,6 @@ body[data-contrast="high"] .chart-line {
     width: 100%;
   }
 
-  .camera-dock.vertical {
-    flex-direction: row;
-    border-radius: 999px;
-    overflow-x: auto;
-  }
-
-  .camera-dock.vertical .camera-dock-btn {
-    width: auto;
-    flex: 1;
-    justify-content: center;
-    padding: 8px 12px;
-  }
 
   .page-bar {
     grid-template-columns: 1fr;
@@ -2200,30 +2498,6 @@ body[data-contrast="high"] .chart-line {
 /* =====================================================
    ZABEZPIECZENIA: kłódka w pasku, PIN, blokada, parowanie, urządzenia, kody QR
    ===================================================== */
-/* Ustawienia → Działanie: dwie kolumny na szerokich ekranach */
-@media (min-width: 851px) {
-  .settings-cols {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    column-gap: 26px;
-    align-items: start;
-  }
-
-  .settings-cols .setting-row {
-    gap: 12px;
-  }
-
-  .settings-cols .dd-trigger {
-    min-width: 0;            /* lista tak szeroka jak jej tekst – podpis ma więcej miejsca */
-    gap: 8px;
-    padding-left: 13px;
-  }
-
-  .settings-col .setting-group:last-child {
-    margin-bottom: 0;
-  }
-}
-
 /* Kłódka na środku paska: logo | kłódka | zegar */
 @media (min-width: 851px) {
   .topbar {
@@ -2277,13 +2551,13 @@ body[data-contrast="high"] .chart-line {
 }
 
 .lock-btn[data-mode="pin"],
-.lock-btn[data-mode="klucz"] {
+.lock-btn[data-mode="key"] {
   background: var(--orange);
   color: #fff;
 }
 
 body[data-contrast="high"] .lock-btn[data-mode="pin"],
-body[data-contrast="high"] .lock-btn[data-mode="klucz"] {
+body[data-contrast="high"] .lock-btn[data-mode="key"] {
   color: var(--bg);
 }
 
@@ -2628,6 +2902,31 @@ body[data-contrast="high"] .qr-dot {
   gap: 12px;
 }
 
+/* Działanie → Zasilanie: dwa przyciski w jednym wierszu (jedna kolumna musi się zmieścić na 1024×600) */
+.setting-control.power-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.power-buttons .back-btn {
+  width: auto;
+  white-space: nowrap;
+}
+
+/* Panel ustawień (openSheet): treść przewija się sama, nagłówek z krzyżykiem zostaje na miejscu */
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sheet-body > .setting-row:last-child {
+  border-bottom: none;
+}
+
 .side-head h2 {
   font-size: 22px;
   font-weight: 900;
@@ -2933,6 +3232,35 @@ body[data-contrast="high"] .qr-dot {
   margin-top: 10px;
 }
 
+/* Karta „Zawsze pod ręką”: pszczółka zamiast ptaszka, dwa przyciski jeden pod drugim */
+.setup-home-icon {
+  width: min(30vh, 52vw);
+  height: min(30vh, 52vw);
+}
+
+.setup-home:not(.is-next) .setup-home-icon {
+  animation: setup-bee calc(var(--anim-duration) * 3) var(--anim-ease) var(--setup-duration) both;
+}
+
+@keyframes setup-bee {
+  from {
+    opacity: 0;
+    transform: translate(-24px, 16px) rotate(-12deg) scale(.8);
+  }
+}
+
+.setup-home-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.setup-home .modal-btn.ghost {
+  margin-top: 0;
+}
+
 @media (max-width: 850px) {
   .side-card {
     top: 8px;
@@ -2988,7 +3316,8 @@ body[data-contrast="high"] .qr-dot {
 }
 
 @media (min-width: 851px) and (max-height: 720px) {
-  .settings-cols .setting-row {
+  /* Działanie w jednej kolumnie: 8 wierszy w 2 grupach mieści się na 1024×600 dopiero z tym odstępem */
+  #settings-operation .setting-row {
     padding-top: 7px;
     padding-bottom: 7px;
   }
@@ -3184,9 +3513,10 @@ body[data-contrast="high"] .qr-dot {
 
 .range {
   flex: 1;
-  height: 8px;
+  height: 14px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--orange) 25%, var(--line));
+  border: 2px dashed var(--orange);          /* krawędź jak przycisk „+ Dodaj regułę otwarcia” */
+  background: color-mix(in srgb, var(--orange) 22%, transparent);
   -webkit-appearance: none;
   appearance: none;
   outline: none;
@@ -3368,7 +3698,7 @@ html.crt-off body {
 }
 
 /* ---------- TELEFON I KOMPUTER: kafelki jako osobne karty (jak reszta menu głównego) ---------- */
-body[data-urzadzenie="telefon"] .dash-card.quad {
+body[data-device="phone"] .dash-card.quad {
   gap: 20px;
   padding: 0;
   overflow: visible;
@@ -3378,11 +3708,11 @@ body[data-urzadzenie="telefon"] .dash-card.quad {
 }
 
 /* Parowanie obok Estetyki (na wyświetlaczu zostaje w siatce 2 × 2 na swoim miejscu) */
-body[data-urzadzenie="telefon"] #tile-pair {
+body[data-device="phone"] #tile-pair {
   order: 4;
 }
 
-body[data-urzadzenie="telefon"] .quad-tile {
+body[data-device="phone"] .quad-tile {
   gap: 10px;
   overflow: visible;
   border: 4px solid var(--orange-dark);
@@ -3393,7 +3723,19 @@ body[data-urzadzenie="telefon"] .quad-tile {
   transition: transform .2s, border-color .2s, box-shadow .25s, background .3s;
 }
 
-body[data-urzadzenie="telefon"] .quad-tile:hover {
+/* Wąski telefon: same ikony – podpisy nie mieściły się w kafelkach. Napis zostaje dla czytników ekranu. */
+@media (max-width: 600px) {
+  body[data-device="phone"] .quad-tile span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+body[data-device="phone"] .quad-tile:hover {
   transform: translateY(var(--hover-lift));
   border-color: var(--orange);
   background: var(--card-background);
@@ -3406,34 +3748,311 @@ body[data-urzadzenie="telefon"] .quad-tile:hover {
    ciemne tła (przyciski, karty, linie) są więc rozjaśnione tak, żeby kanały były powyżej progu – na tym
    panelu wyglądają jak oryginalne kolory na dobrym ekranie. Telefony i komputery mają kolory bez zmian. */
 /* Szarości lekko ciepłe: neutralne #333333 panel pokazuje zielonkawo (wybór użytkownika z planszy: #38312F) */
-body[data-urzadzenie="wyswietlacz"][data-theme="nocna-czern"] {
+body[data-device="display"][data-theme="night-black"] {
   --card-background: #38312F;
   --line: #554B48;
   --orange-soft: #5C3A00;
   --dock-bg: rgba(56, 49, 47, 0.75);
 }
 
-body[data-urzadzenie="wyswietlacz"][data-theme="miodna-szarosc"] {
+body[data-device="display"][data-theme="honey-grey"] {
   --card-background: #463820;
   --line: #66542F;
   --orange-soft: #5E4818;
   --dock-bg: rgba(70, 56, 32, 0.8);
 }
 
-body[data-urzadzenie="wyswietlacz"][data-theme="miodna-szarosc"]:not([data-contrast="high"]) {
+body[data-device="display"][data-theme="honey-grey"]:not([data-contrast="high"]) {
   --bg: #2E2410;
 }
 
-body[data-urzadzenie="wyswietlacz"][data-contrast="high"][data-theme="nocna-czern"] {
+body[data-device="display"][data-contrast="high"][data-theme="night-black"] {
   --orange-soft: #555555;
 }
 
-body[data-urzadzenie="wyswietlacz"][data-contrast="high"][data-theme="miodna-szarosc"] {
+body[data-device="display"][data-contrast="high"][data-theme="honey-grey"] {
   --line: #6A6A6A;
 }
 
 /* Kafelki „Ustawienia”: 9 % pomarańczu na ciemnej karcie znika w czerni – pełne tło przycisku */
-body[data-urzadzenie="wyswietlacz"][data-theme="nocna-czern"] .quad-tile,
-body[data-urzadzenie="wyswietlacz"][data-theme="miodna-szarosc"] .quad-tile {
+body[data-device="display"][data-theme="night-black"] .quad-tile,
+body[data-device="display"][data-theme="honey-grey"] .quad-tile {
   background: var(--orange-soft);
+}
+
+/* ---------- APLIKACJA NA ANDROIDA (body[data-app="android"]) ----------
+   Bez zegara, logo na środku paska; strona rysuje się pod paskiem stanu i nawigacji, więc dostaje ich
+   wysokość (--safe-*, app.js sekcja 0a). */
+body[data-app="android"] .datetime {
+  display: none;
+}
+
+body[data-app="android"] .topbar {
+  display: flex;
+  justify-content: center;
+  padding-top: calc(15px + var(--safe-top, 0px));
+  padding-left: calc(clamp(16px, 3vw, 30px) + var(--safe-left, 0px));
+  padding-right: calc(clamp(16px, 3vw, 30px) + var(--safe-right, 0px));
+}
+
+body[data-app="android"] main {
+  padding-bottom: calc(40px + var(--safe-bottom, 0px));
+}
+
+body[data-app="android"] :is(.pair-screen, .setup-card) {
+  padding-top: calc(28px + var(--safe-top, 0px));
+  padding-bottom: calc(20px + var(--safe-bottom, 0px));
+}
+
+body[data-app="android"] .side-card {
+  top: calc(8px + var(--safe-top, 0px));
+  bottom: calc(8px + var(--safe-bottom, 0px));
+}
+
+/* Przycisk „Zainstaluj aplikację” na ekranie parowania */
+.pair-install {
+  text-align: center;
+  text-decoration: none;
+}
+
+.pair-install-help {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* ---------- USTAWIENIA NA TELEFONIE (jak w iOS) ----------
+   Najpierw lista kategorii na całym ekranie, wybrana kategoria wjeżdża od prawej na cały ekran (app.js, sekcja 2).
+   Wiersze ze strzałką i przełącznikiem: kontrolka po prawej, na równi z tekstem. */
+.settings-title,
+.settings-detail-head {
+  display: none;
+}
+
+/* O aplikacji: duże logo */
+.about-logo {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0 26px;
+}
+
+.about-logo svg {
+  height: clamp(44px, 9vw, 64px);
+}
+
+@media (max-width: 850px) {
+  .settings-title {
+    display: block;
+    font-size: 32px;
+    font-weight: 900;
+    letter-spacing: -.5px;
+    margin-top: 4px;
+  }
+
+  .settings-nav .back-btn {
+    align-self: flex-start;
+  }
+
+  .camera-dock.vertical.settings-sidebar {
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+    border-radius: var(--radius);
+    background: var(--card-background);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+  }
+
+  .settings-sidebar .dock-indicator {
+    display: none;
+  }
+
+  .camera-dock.vertical.settings-sidebar .camera-dock-btn,
+  .camera-dock.vertical.settings-sidebar .camera-dock-btn.active {
+    width: 100%;
+    flex: none;
+    justify-content: flex-start;
+    gap: 14px;
+    padding: 14px 16px;
+    border-radius: 0;
+    background: none;
+    color: var(--black);
+    font-size: 17px;
+    box-shadow: none;
+  }
+
+  .settings-sidebar .camera-dock-btn + .camera-dock-btn {
+    border-top: 1px solid var(--line);
+  }
+
+  /* ikona w zaokrąglonym kwadracie, strzałka „›” na końcu wiersza */
+  .settings-sidebar .camera-dock-btn svg {
+    width: 34px;
+    height: 34px;
+    padding: 7px;
+    border-radius: 10px;
+    background: var(--orange);
+    stroke: var(--card-background);
+    flex-shrink: 0;
+  }
+
+  .settings-sidebar .camera-dock-btn::after {
+    content: "";
+    margin-left: auto;
+    width: 10px;
+    height: 10px;
+    border-right: 2.5px solid var(--muted);
+    border-top: 2.5px solid var(--muted);
+    transform: rotate(45deg);
+  }
+
+  /* kategoria na całym ekranie */
+  .settings-content {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--bg);
+    padding: calc(16px + var(--safe-top, 0px)) 16px calc(40px + var(--safe-bottom, 0px));
+    transform: translateX(100%);
+    visibility: hidden;
+    transition: transform var(--anim-duration) var(--anim-ease), visibility 0s linear var(--anim-duration);
+  }
+
+  .settings-container.is-detail .settings-content {
+    transform: none;
+    visibility: visible;
+    transition: transform var(--anim-duration) var(--anim-ease), visibility 0s;
+  }
+
+  .settings-container.is-instant .settings-content {
+    transition: none;
+  }
+
+  .settings-detail-head {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .settings-detail-title {
+    font-size: 30px;
+    font-weight: 900;
+    letter-spacing: -.5px;
+  }
+
+  /* grupy jako karty */
+  .settings-content .setting-group {
+    background: var(--card-background);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px 16px 4px;
+    margin-bottom: 18px;
+  }
+
+  /* strzałka i przełącznik po prawej, na równi z tekstem */
+  .setting-row:has(> .setting-control > :is(.arrow-btn, .toggle-switch)) {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .setting-row:has(> .setting-control > :is(.arrow-btn, .toggle-switch)) > :first-child {
+    flex: 1;
+  }
+
+  .setting-row:has(> .setting-control > :is(.arrow-btn, .toggle-switch)) > .setting-control {
+    width: auto;
+  }
+}
+
+/* Telefon: nagłówki ustawień wyśrodkowane (lista, otwarta kategoria i sekcje) */
+@media (max-width: 850px) {
+  .settings-title,
+  .settings-detail-title,
+  .settings-content .setting-group-title {
+    text-align: center;
+    align-self: stretch;
+  }
+}
+
+/* Tryb demonstracyjny (static/demo.js): znaczek pod logo */
+body.is-demo .topbar {
+  flex-direction: column;
+  gap: 6px;
+}
+
+.demo-badge {
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--orange-soft);
+  color: var(--orange-dark);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .3px;
+}
+
+/* Stan wylotka: suwak otwarcia obok przycisków Otwórz / Zablokuj */
+.door-range {
+  flex: 1 1 220px;
+  min-width: 180px;
+  align-self: center;
+}
+
+/* ---------- TELEFON: Dokarmiaczka, Wylotek, Monitoring ---------- */
+@media (max-width: 850px) {
+  /* zbiornik nie wystaje za ekran: szerokość z ekranu, wysokość z proporcji */
+  .tank {
+    align-self: center;
+  }
+
+  .tank-body {
+    height: auto;
+    min-height: 0;
+    width: clamp(110px, 40vw, 180px);
+  }
+
+  /* wylotek: duży model zasuwy nad opisem, suwak na całą szerokość */
+  .door-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .door {
+    order: -1;
+    width: min(100%, 360px);
+    align-self: center;
+    margin: 6px 0 4px;
+  }
+
+  .door-range {
+    flex-basis: 100%;
+  }
+
+  /* monitoring: pola informacji pod sobą, na całą szerokość; treść się zawija */
+  .monitor-side .stats {
+    grid-template-columns: 1fr;
+  }
+
+  .monitor-side .stat .pill {
+    white-space: normal;
+  }
+}
+
+/* Atmosfera: „minimum / maksimum” – na telefonie skrót „min. / max.” (życzenie użytkownika) */
+.word-short {
+  display: none;
+}
+
+@media (max-width: 850px) {
+  .word-long {
+    display: none;
+  }
+
+  .word-short {
+    display: inline;
+  }
 }

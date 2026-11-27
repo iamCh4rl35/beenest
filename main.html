@@ -6,15 +6,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#FF8A00">
   <title>Centrala BEENest</title>
+  <!-- Ikona strony i skrót na ekranie głównym: pszczółka z logo. "display": "browser" – skrót otwiera zwykłą kartę
+       przeglądarki. iOS / iPadOS 26 i tak otwiera ikonę jako osobną aplikację z własnymi ciasteczkami – sparowanie
+       przenosi wtedy klucz w adresie startowym (app.py: api_pair_transfer). -->
+  <link rel="icon" href="{{ url_for('static', filename='icons/bee.svg') }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+  <!-- Manifest z serwera: dla sparowanego urządzenia adres startowy niesie klucz przeniesienia sparowania (iOS) -->
+  <link rel="manifest" href="{{ url_for('manifest', t=device.transfer) if device.transfer else url_for('manifest') }}">
+  <meta name="apple-mobile-web-app-title" content="BEENest">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <!-- [wyglad] z data/global.conf – nadpisuje wartości z style.css -->
+  <!-- [look] z data/global.conf – nadpisuje wartości z style.css -->
   <style id="conf-look">{{ look_css|safe }}</style>
 </head>
 
-<body data-theme="bialy-pylek" data-contrast="normal">
+<!-- Motyw wpisuje serwer – bez tego strona rysowała się najpierw biało, a ciemny motyw wchodził dopiero po
+     wczytaniu app.js (biały błysk przy starcie wyświetlacza). Pierwsze wejście urządzenia: app.js dobiera motyw z systemu. -->
+<body data-theme="{{ device.settings.theme }}" data-contrast="{{ 'high' if device.settings.highContrast else 'normal' }}"
+      data-device="{{ 'display' if auth.display else 'phone' }}"{% if app %} data-app="android"{% endif %}>
 
   <header class="topbar">
-    <a href="#home" class="logo">BEE<span>NEST</span></a>
+    <a href="#home" class="logo" aria-label="BEENest – strona główna"><svg viewBox="0 0 1521 261" aria-hidden="true"><use href="{{ url_for('static', filename='logo.svg') }}#logo"></use></svg></a>
     <!-- Tylko wyświetlacz przy ulu, na środku paska: odblokowanie PIN-em / "Zahasłuj Panel" / stan Klucza -->
     <button type="button" class="lock-btn" id="lock-btn" hidden>
       <svg viewBox="0 0 24 24" id="lock-btn-icon"></svg>
@@ -37,7 +48,7 @@
         <!-- LEWA KOLUMNA: Atmosfera (górna połowa) + Stan wylotka (dolna połowa) -->
         <div class="left-col">
 
-          <a href="#temperatura" class="panel-card is-featured" id="dash-atmo">
+          <a href="#atmosphere" class="panel-card is-featured" id="dash-atmo">
           <div class="card-header">
             <span>Atmosfera</span>
             <div class="ico"><svg viewBox="0 0 24 24" id="dash-atmo-icon"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg></div>
@@ -53,7 +64,7 @@
         </a>
 
           <!-- Wylotek (serwomechanizm otwierający / blokujący) -->
-          <a href="#wylotek" class="panel-card">
+          <a href="#outlet" class="panel-card">
             <div class="card-header">
               <span>Stan Wylotka</span>
               <div class="ico"><svg viewBox="0 0 24 24">
@@ -74,7 +85,7 @@
         <div class="right-grid">
 
           <!-- Samopoczucie -->
-          <a href="#samopoczucie" class="panel-card">
+          <a href="#wellbeing" class="panel-card">
             <div class="card-header">
               <span>Samopoczucie</span>
               <div class="ico"><svg viewBox="0 0 24 24">
@@ -89,7 +100,7 @@
           </a>
 
           <!-- Dokarmiaczka -->
-          <a href="#dokarmiaczka" class="panel-card">
+          <a href="#feeder" class="panel-card">
             <div class="card-header">
               <span>Stan Dokarmiaczki</span>
               <div class="ico"><svg viewBox="0 0 24 24">
@@ -97,19 +108,29 @@
                 </svg></div>
             </div>
             <div>
-              <div class="card-status" id="dash-feeder-compact">-- %</div>
+              <div class="card-status highlight" id="dash-feeder-compact">-- %</div>
               <div class="card-caption" id="dash-feeder-caption">Poziom zbiornika</div>
             </div>
           </a>
 
           <!-- Monitoring (stały) -->
-          <a href="#monitoring" class="dash-card monitoring">
-            <div>Monitoring <span class="arrow">→</span></div>
+          <a href="#monitoring" class="panel-card" id="dash-monitoring">
+            <div class="card-header">
+              <span>Monitoring</span>
+              <div class="ico"><svg viewBox="0 0 24 24">
+                  <polygon points="23 7 16 12 23 17 23 7" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                </svg></div>
+            </div>
+            <div>
+              <div class="card-status" id="dash-camera-compact">--</div>
+              <div class="card-caption">Ostatnia kamera</div>
+            </div>
           </a>
 
           <!-- Ustawienia (stałe): cztery kafelki; na telefonie osobne karty. Parowanie – opcja administratora. -->
           <div class="dash-card quad" role="group" aria-label="Ustawienia">
-            <a href="#ustawienia" class="quad-tile">
+            <a href="#settings" class="quad-tile">
               <svg viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="3" />
                 <path
@@ -204,55 +225,55 @@
     </section>
 
     <!-- ============ TEMPERATURA ============ -->
-    <section id="temperatura" class="page page-chart">
+    <section id="atmosphere" class="page page-chart">
       <div class="page-head">
         <a href="#home" class="back-btn">← Wróć do panelu</a>
         <h1>Atmosfera</h1>
       </div>
       <!-- Odczyty: w ulu / na zewnątrz + minimum i maksimum z 24 godzin. Kliknięcie grupy pokazuje ją na wykresie. -->
       <div class="atmo-strip">
-        <div class="atmo-group" data-param="temperatura" role="button" tabindex="0" aria-label="Pokaż na wykresie: Temperatura">
+        <div class="atmo-group" data-param="temperature" role="button" tabindex="0" aria-label="Pokaż na wykresie: Temperatura">
           <div class="atmo-group-title">Temperatura <span>· ostatnie 24 godziny</span></div>
           <div class="atmo-group-cells">
-            <div class="stat atmo-cell" id="atmo-cell-temperatura-in">
+            <div class="stat atmo-cell" id="atmo-cell-temperature-in">
               <div class="label">W ulu</div>
               <div class="value"><span id="temp-current">--</span><span class="unit">°C</span></div>
-              <div class="atmo-range">minimum <span id="temp-min">--</span> · maksimum <span id="temp-max">--</span></div>
+              <div class="atmo-range"><span class="word-long">minimum</span><span class="word-short">min.</span> <span id="temp-min">--</span> · <span class="word-long">maksimum</span><span class="word-short">max.</span> <span id="temp-max">--</span></div>
             </div>
-            <div class="stat atmo-cell" id="atmo-cell-temperatura-out">
+            <div class="stat atmo-cell" id="atmo-cell-temperature-out">
               <div class="label">Na zewnątrz</div>
               <div class="value"><span id="temp-outside">--</span><span class="unit">°C</span></div>
-              <div class="atmo-range">minimum <span id="temp-outside-min">--</span> · maksimum <span id="temp-outside-max">--</span></div>
+              <div class="atmo-range"><span class="word-long">minimum</span><span class="word-short">min.</span> <span id="temp-outside-min">--</span> · <span class="word-long">maksimum</span><span class="word-short">max.</span> <span id="temp-outside-max">--</span></div>
             </div>
           </div>
         </div>
-        <div class="atmo-group" data-param="wilgoc" role="button" tabindex="0" aria-label="Pokaż na wykresie: Wilgotność">
+        <div class="atmo-group" data-param="humidity" role="button" tabindex="0" aria-label="Pokaż na wykresie: Wilgotność">
           <div class="atmo-group-title">Wilgotność <span>· ostatnie 24 godziny</span></div>
           <div class="atmo-group-cells">
-            <div class="stat atmo-cell" id="atmo-cell-wilgoc-in">
+            <div class="stat atmo-cell" id="atmo-cell-humidity-in">
               <div class="label">W ulu</div>
               <div class="value"><span id="temp-humidity">--</span><span class="unit">%</span></div>
-              <div class="atmo-range">minimum <span id="temp-humidity-min">--</span> · maksimum <span id="temp-humidity-max">--</span></div>
+              <div class="atmo-range"><span class="word-long">minimum</span><span class="word-short">min.</span> <span id="temp-humidity-min">--</span> · <span class="word-long">maksimum</span><span class="word-short">max.</span> <span id="temp-humidity-max">--</span></div>
             </div>
-            <div class="stat atmo-cell" id="atmo-cell-wilgoc-out">
+            <div class="stat atmo-cell" id="atmo-cell-humidity-out">
               <div class="label">Na zewnątrz</div>
               <div class="value"><span id="temp-outside-humidity">--</span><span class="unit">%</span></div>
-              <div class="atmo-range">minimum <span id="temp-outside-humidity-min">--</span> · maksimum <span id="temp-outside-humidity-max">--</span></div>
+              <div class="atmo-range"><span class="word-long">minimum</span><span class="word-short">min.</span> <span id="temp-outside-humidity-min">--</span> · <span class="word-long">maksimum</span><span class="word-short">max.</span> <span id="temp-outside-humidity-max">--</span></div>
             </div>
           </div>
         </div>
-        <div class="atmo-group" data-param="cisnienie" role="button" tabindex="0" aria-label="Pokaż na wykresie: Ciśnienie">
+        <div class="atmo-group" data-param="pressure" role="button" tabindex="0" aria-label="Pokaż na wykresie: Ciśnienie">
           <div class="atmo-group-title">Ciśnienie <span>· ostatnie 24 godziny</span></div>
           <div class="atmo-group-cells">
-            <div class="stat atmo-cell" id="atmo-cell-cisnienie-in">
+            <div class="stat atmo-cell" id="atmo-cell-pressure-in">
               <div class="label">W ulu</div>
               <div class="value"><span id="temp-pressure">--</span><span class="unit">hPa</span></div>
-              <div class="atmo-range">minimum <span id="temp-pressure-min">--</span> · maksimum <span id="temp-pressure-max">--</span></div>
+              <div class="atmo-range"><span class="word-long">minimum</span><span class="word-short">min.</span> <span id="temp-pressure-min">--</span> · <span class="word-long">maksimum</span><span class="word-short">max.</span> <span id="temp-pressure-max">--</span></div>
             </div>
-            <div class="stat atmo-cell" id="atmo-cell-cisnienie-out">
+            <div class="stat atmo-cell" id="atmo-cell-pressure-out">
               <div class="label">Na zewnątrz</div>
               <div class="value"><span id="temp-outside-pressure">--</span><span class="unit">hPa</span></div>
-              <div class="atmo-range">minimum <span id="temp-outside-pressure-min">--</span> · maksimum <span id="temp-outside-pressure-max">--</span></div>
+              <div class="atmo-range"><span class="word-long">minimum</span><span class="word-short">min.</span> <span id="temp-outside-pressure-min">--</span> · <span class="word-long">maksimum</span><span class="word-short">max.</span> <span id="temp-outside-pressure-max">--</span></div>
             </div>
           </div>
         </div>
@@ -273,16 +294,16 @@
           </div>
           <!-- Parametr na wykresie -->
           <div class="camera-dock chart-dock" id="atmo-param-dock" role="tablist" aria-label="Parametr wykresu">
-            <button class="camera-dock-btn active" role="tab" data-param="temperatura">Temperatura</button>
-            <button class="camera-dock-btn" role="tab" data-param="wilgoc">Wilgotność</button>
-            <button class="camera-dock-btn" role="tab" data-param="cisnienie">Ciśnienie</button>
+            <button class="camera-dock-btn active" role="tab" data-param="temperature">Temperatura</button>
+            <button class="camera-dock-btn" role="tab" data-param="humidity">Wilgotność</button>
+            <button class="camera-dock-btn" role="tab" data-param="pressure">Ciśnienie</button>
           </div>
         </div>
       </div>
     </section>
 
     <!-- ============ SAMOPOCZUCIE ============ -->
-    <section id="samopoczucie" class="page page-chart">
+    <section id="wellbeing" class="page page-chart">
       <div class="page-head">
         <a href="#home" class="back-btn">← Wróć do panelu</a>
         <h1>Samopoczucie pszczół</h1>
@@ -325,35 +346,42 @@
     </section>
 
     <!-- ============ DOKARMIACZKA ============ -->
-    <section id="dokarmiaczka" class="page">
-      <a href="#home" class="back-btn">← Wróć do panelu</a>
-      <h1>Stan dokarmiaczki</h1>
-      <p class="lead">Poziom pokarmu oraz historia uzupełnień.</p>
+    <section id="feeder" class="page">
+      <div class="page-head">
+        <a href="#home" class="back-btn">← Wróć do panelu</a>
+        <h1>Stan dokarmiaczki</h1>
+      </div>
       <div class="stats">
         <div class="stat primary">
           <div class="label">Poziom pokarmu</div>
-          <div class="value"><span id="f-level">--</span><span class="unit">%</span></div>
-        </div>
-        <div class="stat">
-          <div class="label">Masa pokarmu</div>
-          <div class="value"><span id="f-weight">--</span><span class="unit">kg</span></div>
+          <div class="value" id="f-level-value"><span id="f-level">--</span><span class="unit" id="f-level-unit">%</span></div>
         </div>
         <div class="stat">
           <div class="label">Ostatnie uzupełnienie</div>
           <div class="value small"><span id="f-last">--</span></div>
         </div>
       </div>
-      <div class="panel">
-        <div class="row"><span>Wypełnienie zbiornika</span><strong><span id="f-level-label">--</span>%</strong></div>
-        <div class="bar"><i id="feeder-bar"></i></div>
+      <!-- Model zbiornika jak bateria: 4 części zapalane od dołu (15 / 40 / 80 / 100 % = 1 / 2 / 3 / 4) -->
+      <div class="panel tank-panel">
+        <div class="tank-info">
+          <div class="tank-label">Wypełnienie zbiornika</div>
+          <div class="tank-value" id="f-level-label">--</div>
+          <div class="tank-desc" id="f-level-desc">Poziom wyznaczają trzy czujniki cieczy na ściance zbiornika.</div>
+        </div>
+        <div class="tank" id="feeder-tank" aria-hidden="true">
+          <div class="tank-body">
+            <i class="tank-seg"></i><i class="tank-seg"></i><i class="tank-seg"></i><i class="tank-seg"></i>
+          </div>
+        </div>
       </div>
     </section>
 
     <!-- ============ WYLOTEK ============ -->
-    <section id="wylotek" class="page">
-      <a href="#home" class="back-btn">← Wróć do panelu</a>
-      <h1>Stan wylotka</h1>
-      <p class="lead">Serwomechanizm otwierający lub blokujący wylotek ula.</p>
+    <section id="outlet" class="page">
+      <div class="page-head">
+        <a href="#home" class="back-btn">← Wróć do panelu</a>
+        <h1>Stan wylotka</h1>
+      </div>
       <div class="stats">
         <div class="stat primary">
           <div class="label">Wylotek</div>
@@ -364,18 +392,39 @@
           <div class="value"><span id="o-position">--</span><span class="unit">%</span></div>
         </div>
       </div>
-      <div class="panel">
-        <div class="row"><span>Otwarcie wylotka</span><strong><span id="o-position-label">--</span>%</strong></div>
-        <div class="bar"><i id="outlet-bar"></i></div>
+      <!-- Model wylotka: otwór (koło) i pomarańczowa zasuwa (kwadrat), która odsuwa się w lewo wraz z otwarciem.
+           100 % = zasuwa dotyka koła jednym punktem, 0 % = zakrywa je. Obrys koła widać przez zasuwę. -->
+      <div class="panel door-panel">
+        <div class="door-info">
+          <div class="tank-label">Otwarcie wylotka</div>
+          <div class="tank-value" id="o-position-label">--</div>
+          <div class="tank-desc">Zasuwę przesuniesz suwakiem albo przyciskami poniżej, a w programowaniu czasowym ustawisz otwarcie o wybranych godzinach.</div>
+          <div class="door-actions" data-admin>
+            <!-- suwak: pozycja jedzie do serwa na żywo (app.js, sekcja 13) -->
+            <div class="range-box door-range">
+              <input type="range" class="range" id="outlet-range" min="0" max="100" step="1" aria-label="Otwarcie wylotka">
+              <span class="range-value" id="outlet-range-value">--</span>
+            </div>
+            <button type="button" class="back-btn" id="btn-outlet-open">Otwórz</button>
+            <button type="button" class="back-btn" id="btn-outlet-close">Zablokuj</button>
+            <button type="button" class="back-btn btn-primary" id="btn-outlet-panel">Programowanie czasowe</button>
+          </div>
+        </div>
+        <svg class="door" id="outlet-door" viewBox="0 0 250 100" aria-hidden="true">
+          <circle class="door-hole" cx="200" cy="50" r="44" />
+          <rect class="door-slide" id="outlet-door-slide" x="156" y="6" width="88" height="88" rx="8" />
+          <circle class="door-outline" cx="200" cy="50" r="44" />
+        </svg>
       </div>
     </section>
 
     <!-- ============ USTAWIENIA ============ -->
-    <section id="ustawienia" class="page">
+    <section id="settings" class="page">
     <div class="settings-container">
       <!-- Lewa kolumna: Wróć + pionowy dock kategorii (ikona po lewej, tekst od lewej) -->
       <nav class="settings-nav">
         <a href="#home" class="back-btn">← Wróć do panelu</a>
+        <h1 class="settings-title">Ustawienia</h1>
         <div class="camera-dock settings-sidebar vertical" role="tablist" aria-orientation="vertical" aria-label="Kategorie ustawień">
         <button class="camera-dock-btn settings-tab active" aria-selected="true" role="tab" data-target="settings-appearance">
             <svg viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
@@ -393,6 +442,11 @@
       </nav>
 
         <div class="settings-content">
+          <!-- Telefon (≤ 850 px): kategoria otwiera się na całym ekranie jak w iOS; tu powrót do listy (app.js, sekcja 2) -->
+          <div class="settings-detail-head">
+            <button type="button" class="back-btn" id="settings-back">← Ustawienia</button>
+            <h2 class="settings-detail-title" id="settings-detail-title"></h2>
+          </div>
 
           <!-- WYGLĄD -->
           <div id="settings-appearance" class="settings-panel active">
@@ -403,8 +457,8 @@
                 <div>
                   <div class="setting-label">Motyw i kontrast</div>
                   <div class="setting-desc">
-                    <span data-only="wyswietlacz">Kolory aplikacji, wysoki kontrast i jasność ekranu.</span>
-                    <span data-only="telefon">Kolory aplikacji i wysoki kontrast.</span>
+                    <span data-only="display">Kolory aplikacji, wysoki kontrast i jasność ekranu.</span>
+                    <span data-only="phone">Kolory aplikacji i wysoki kontrast.</span>
                   </div>
                 </div>
                 <div class="setting-control">
@@ -425,82 +479,82 @@
                 </div>
                 <div class="setting-control">
                   <select id="atmo-data-select">
-                    <option value="temperatura">Temperatura</option>
-                    <option value="cisnienie">Ciśnienie</option>
-                    <option value="wilgoc">Wilgoć</option>
+                    <option value="temperature">Temperatura</option>
+                    <option value="pressure">Ciśnienie</option>
+                    <option value="humidity">Wilgoć</option>
                   </select>
                 </div>
               </div>
-              <div class="setting-row" data-atmo-mode="temperatura">
+              <div class="setting-row" data-atmo-mode="temperature">
                 <div>
                   <div class="setting-label">Wyróżniona temperatura</div>
                   <div class="setting-desc">Wartość pogrubiona na karcie temperatury.</div>
                 </div>
                 <div class="setting-control">
                   <select id="temp-highlight-select">
-                    <option value="w-ulu">W ulu</option>
-                    <option value="na-zewnatrz">Na zewnątrz</option>
+                    <option value="inside">W ulu</option>
+                    <option value="outside">Na zewnątrz</option>
                   </select>
                 </div>
               </div>
-              <div class="setting-row" data-atmo-mode="temperatura">
+              <div class="setting-row" data-atmo-mode="temperature">
                 <div>
                   <div class="setting-label">Zakres wyróżnionej temperatury</div>
                   <div class="setting-desc">Jaki typ odczytu ma być wyświetlany jako główny.</div>
                 </div>
                 <div class="setting-control">
                   <select id="temp-range-select">
-                    <option value="obecna">Obecna</option>
+                    <option value="current">Obecna</option>
                     <option value="min-24h">Minimum z 24 godzin</option>
                     <option value="max-24h">Maksimum z 24 godzin</option>
                   </select>
                 </div>
               </div>
-              <div class="setting-row" data-atmo-mode="wilgoc">
+              <div class="setting-row" data-atmo-mode="humidity">
                 <div>
                   <div class="setting-label">Wyróżniona wilgotność</div>
                   <div class="setting-desc">Wartość pogrubiona na karcie wilgotności.</div>
                 </div>
                 <div class="setting-control">
                   <select id="humidity-highlight-select">
-                    <option value="w-ulu">W ulu</option>
-                    <option value="na-zewnatrz">Na zewnątrz</option>
+                    <option value="inside">W ulu</option>
+                    <option value="outside">Na zewnątrz</option>
                   </select>
                 </div>
               </div>
-              <div class="setting-row" data-atmo-mode="wilgoc">
+              <div class="setting-row" data-atmo-mode="humidity">
                 <div>
                   <div class="setting-label">Zakres wyróżnionej wilgotności</div>
                   <div class="setting-desc">Jaki typ odczytu ma być wyświetlany jako główny.</div>
                 </div>
                 <div class="setting-control">
                   <select id="humidity-range-select">
-                    <option value="obecna">Obecna</option>
+                    <option value="current">Obecna</option>
                     <option value="min-24h">Minimum z 24 godzin</option>
                     <option value="max-24h">Maksimum z 24 godzin</option>
                   </select>
                 </div>
               </div>
-              <div class="setting-row" data-atmo-mode="cisnienie">
+              <div class="setting-row" data-atmo-mode="pressure">
                 <div>
                   <div class="setting-label">Wyróżnione ciśnienie</div>
                   <div class="setting-desc">Wartość pogrubiona na karcie ciśnienia.</div>
                 </div>
                 <div class="setting-control">
                   <select id="pressure-highlight-select">
-                    <option value="w-ulu">W ulu</option>
-                    <option value="na-zewnatrz">Na zewnątrz</option>
+                    <option value="inside">W ulu</option>
+                    <option value="outside">Na zewnątrz</option>
                   </select>
                 </div>
               </div>
-              <div class="setting-row" data-atmo-mode="cisnienie">
+              <div class="setting-row" data-atmo-mode="pressure">
                 <div>
                   <div class="setting-label">Zakres wyróżnionego ciśnienia</div>
                   <div class="setting-desc">Jaki typ odczytu ma być wyświetlany jako główny.</div>
                 </div>
                 <div class="setting-control">
                   <select id="pressure-range-select">
-                    <option value="obecna">Obecna</option>
+                    <option value="current">Obecna</option>
                     <option value="min-24h">Minimum z 24 godzin</option>
                     <option value="max-24h">Maksimum z 24 godzin</option>
                   </select>
@@ -513,9 +567,9 @@
                 </div>
                 <div class="setting-control">
                   <select id="wellbeing-data-select">
-                    <option value="stan">Stan rodziny</option>
-                    <option value="natezenie">Natężenie w dB</option>
-                    <option value="czestotliwosci">Częstotliwości</option>
+                    <option value="status">Stan rodziny</option>
+                    <option value="loudness">Natężenie w dB</option>
+                    <option value="frequency">Częstotliwości</option>
                   </select>
                 </div>
               </div>
@@ -526,9 +580,21 @@
                 </div>
                 <div class="setting-control">
                   <select id="feeder-data-select">
-                    <option value="poziom">Poziom zbiornika</option>
-                    <option value="ostatnie">Ostatnie napełnienie</option>
+                    <option value="level">Poziom zbiornika</option>
+                    <option value="last-refill">Ostatnie napełnienie</option>
                   </select>
+                </div>
+              </div>
+              <div class="setting-row">
+                <div>
+                  <div class="setting-label">Słowny stan dokarmiaczki</div>
+                  <div class="setting-desc">Na przykład „Zapas płynu” zamiast procentów.</div>
+                </div>
+                <div class="setting-control">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="feeder-words-toggle" checked>
+                    <span class="slider"></span>
+                  </label>
                 </div>
               </div>
             </div>
@@ -536,11 +602,23 @@
 
           <!-- DZIAŁANIE -->
           <div id="settings-operation" class="settings-panel">
-            <!-- Dwie kolumny na szerokich ekranach (żeby zmieściło się na 1024×600), jedna na telefonie -->
-            <div class="settings-cols">
-            <div class="settings-col">
+            <!-- Jedna kolumna jak Wygląd. Żeby zmieściło się na 1024×600: dwie grupy (Ul, Bezpieczeństwo),
+                 zasilanie w jednym wierszu (decyzja użytkownika 2026-11-21, bez osobnej grupy „Informowanie”). -->
             <div class="setting-group">
-              <div class="setting-group-title">Zapisy i odczyty</div>
+              <div class="setting-group-title">Ul</div>
+              <div class="setting-row" data-admin>
+                <div>
+                  <div class="setting-label">Zapisy i odczyty</div>
+                  <div class="setting-desc">Interwał zapisu, długość przechowywania i wymazywanie danych.</div>
+                </div>
+                <div class="setting-control">
+                  <button type="button" class="arrow-btn" id="btn-saving" aria-label="Otwórz zapisy i odczyty">
+                    <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>
+                  </button>
+                </div>
+              </div>
+              <!-- Prawdziwe wiersze – na czas otwarcia panelu przenoszone do niego (app.js -> openSaving) -->
+              <div id="saving-source" hidden>
               <div class="setting-row" data-admin>
                 <div>
                   <div class="setting-label">Interwał zapisu danych</div>
@@ -593,10 +671,7 @@
                   <button type="button" class="back-btn btn-wide btn-danger" id="btn-clear-history">Usuń</button>
                 </div>
               </div>
-            </div>
-
-            <div class="setting-group">
-              <div class="setting-group-title">Informowanie</div>
+              </div>
               <div class="setting-row" data-admin>
                 <div>
                   <div class="setting-label">Alarmuj o napełnieniu dokarmiaczki</div>
@@ -609,17 +684,36 @@
                   </label>
                 </div>
               </div>
+              <!-- To samo okno co przycisk „Programowanie czasowe” na stronie Stan wylotka (app.js -> openOutlet) -->
+              <div class="setting-row" data-admin>
+                <div>
+                  <div class="setting-label">Programowanie czasowe wylotka</div>
+                  <div class="setting-desc">Otwarcie na żywo i reguły otwarcia o wybranych godzinach.</div>
+                </div>
+                <div class="setting-control">
+                  <button type="button" class="arrow-btn" id="btn-outlet-settings" aria-label="Otwórz sterowanie wylotkiem">
+                    <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="setting-row" data-admin>
+                <div>
+                  <div class="setting-label">Zasilanie ula</div>
+                  <div class="setting-desc">Uruchom ponownie albo wyłącz ul.</div>
+                </div>
+                <div class="setting-control power-buttons">
+                  <button type="button" class="back-btn btn-wide" id="btn-reboot">Uruchom ponownie</button>
+                  <button type="button" class="back-btn btn-wide btn-danger" id="btn-shutdown">Wyłącz</button>
+                </div>
+              </div>
             </div>
-
-            </div>
-            <div class="settings-col">
 
             <!-- data-admin: na wyświetlaczu klik prosi o PIN, na telefonie użytkownika – wyszarzone.
-                 data-admin="telefon": PIN-u nie wymaga wyświetlacz (tam zmiana PIN-u wymaga Klucza albo starego PIN-u).
+                 data-admin="phone": PIN-u nie wymaga wyświetlacz (tam zmiana PIN-u wymaga Klucza albo starego PIN-u).
                  data-only: gdzie wiersz w ogóle widać. -->
             <div class="setting-group" id="security-group">
               <div class="setting-group-title">Bezpieczeństwo</div>
-              <div class="setting-row" data-admin data-only="wyswietlacz">
+              <div class="setting-row" data-admin data-only="display">
                 <div>
                   <div class="setting-label">Sparuj urządzenie</div>
                   <div class="setting-desc">Połącz telefon lub komputer z ulem kodem QR albo 6 cyframi.</div>
@@ -637,7 +731,7 @@
                   <button type="button" class="back-btn btn-wide" id="btn-devices">Pokaż</button>
                 </div>
               </div>
-              <div class="setting-row" data-admin="telefon">
+              <div class="setting-row" data-admin="phone">
                 <div>
                   <div class="setting-label">PIN administratora</div>
                   <div class="setting-desc">Zmień 6-cyfrowy PIN, którym odblokowuje się panel ula.</div>
@@ -646,7 +740,7 @@
                   <button type="button" class="back-btn btn-wide" id="btn-pin">Zmień</button>
                 </div>
               </div>
-              <div class="setting-row" data-admin data-only="wyswietlacz">
+              <div class="setting-row" data-admin data-only="display">
                 <div>
                   <div class="setting-label">Klucz</div>
                   <div class="setting-desc">Pendrive, który zastępuje PIN administratora.</div>
@@ -655,7 +749,7 @@
                   <button type="button" class="back-btn btn-wide" id="btn-key">Zarządzaj</button>
                 </div>
               </div>
-              <div class="setting-row" data-only="telefon">
+              <div class="setting-row" data-only="phone">
                 <div>
                   <div class="setting-label">Odłącz od ula</div>
                   <div class="setting-desc">To urządzenie straci dostęp; powrót wymaga ponownego parowania.</div>
@@ -666,38 +760,35 @@
               </div>
             </div>
 
-            <div class="setting-group">
-              <div class="setting-group-title">Zasilanie</div>
-              <div class="setting-row" data-admin>
-                <div>
-                  <div class="setting-label">Uruchom ponownie</div>
-                  <div class="setting-desc">Ul na około minutę przestanie odpowiadać.</div>
-                </div>
-                <div class="setting-control">
-                  <button type="button" class="back-btn btn-wide" id="btn-reboot">Uruchom</button>
-                </div>
-              </div>
-              <div class="setting-row" data-admin>
-                <div>
-                  <div class="setting-label">Wyłącz urządzenie</div>
-                  <div class="setting-desc">Ponowne włączenie wymaga odłączenia i podłączenia zasilania.</div>
-                </div>
-                <div class="setting-control">
-                  <button type="button" class="back-btn btn-wide btn-danger" id="btn-shutdown">Wyłącz</button>
-                </div>
-              </div>
-            </div>
-            </div>
-            </div>
           </div>
 
           <!-- O APLIKACJI -->
           <div id="settings-about" class="settings-panel">
+            <div class="about-logo logo" role="img" aria-label="BEENest"><svg viewBox="0 0 1521 261" aria-hidden="true"><use href="{{ url_for('static', filename='logo.svg') }}#logo"></use></svg></div>
             <div class="setting-group">
               <div class="setting-group-title">Informacje</div>
               <div class="setting-row" style="align-items:flex-start; flex-direction:column; gap:5px;">
                 <div class="setting-label" style="font-size:18px;">BEENest — Inteligentny Ul</div>
-                <div class="setting-desc">Wersja 1.0.0 (Build 2026.11.06)</div>
+                <div class="setting-desc">Wersja a.0.2 (Build 2026.11.21)</div>
+              </div>
+              <!-- Android w przeglądarce: aplikacja z ula (app.js, sekcja 18; ukryte, gdy nie ma pliku .apk) -->
+              <div class="setting-row" id="apk-row" hidden>
+                <div>
+                  <div class="setting-label">Aplikacja BEENest na Androida</div>
+                  <div class="setting-desc">Pobierz aplikację z ula i zainstaluj ją na telefonie</div>
+                </div>
+                <div class="setting-control">
+                  <a class="back-btn btn-wide" id="btn-apk" download="beenest.apk">Pobierz</a>
+                </div>
+              </div>
+              <div class="setting-row" id="shortcut-row" hidden>
+                <div>
+                  <div class="setting-label">Dodaj skrót na ekran główny</div>
+                  <div class="setting-desc">Utwórz skrót do aplikacji na ekranie głównym swojego urządzenia</div>
+                </div>
+                <div class="setting-control">
+                  <button type="button" class="back-btn btn-wide" id="btn-home-screen">Dodaj</button>
+                </div>
               </div>
               <div class="setting-row">
                 <div>
@@ -756,9 +847,9 @@
         <button type="button" data-key="1">1</button><button type="button" data-key="2">2</button><button type="button" data-key="3">3</button>
         <button type="button" data-key="4">4</button><button type="button" data-key="5">5</button><button type="button" data-key="6">6</button>
         <button type="button" data-key="7">7</button><button type="button" data-key="8">8</button><button type="button" data-key="9">9</button>
-        <button type="button" data-key="anuluj" class="pin-side">Anuluj</button>
+        <button type="button" data-key="cancel" class="pin-side">Anuluj</button>
         <button type="button" data-key="0">0</button>
-        <button type="button" data-key="usun" class="pin-side" aria-label="Usuń ostatnią cyfrę">
+        <button type="button" data-key="delete" class="pin-side" aria-label="Usuń ostatnią cyfrę">
           <svg viewBox="0 0 24 24"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
         </button>
       </div>
@@ -798,10 +889,28 @@
     </aside>
   </div>
 
+  <!-- Panel ustawień od prawej, wygląda jak Urządzenia: Estetyka, Zapisy i odczyty, Sterowanie wylotkiem
+       (app.js -> openSheet). Parowanie, Klucz i zasilanie zostają zwykłymi oknami. -->
+  <div class="side-panel" id="sheet-panel">
+    <div class="side-backdrop" id="sheet-backdrop"></div>
+    <aside class="side-card" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <div class="side-head">
+        <div>
+          <h2 id="sheet-title"></h2>
+          <div class="setting-desc" id="sheet-desc"></div>
+        </div>
+        <button type="button" class="icon-btn" id="sheet-close" aria-label="Zamknij panel">
+          <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" /></svg>
+        </button>
+      </div>
+      <div class="sheet-body" id="sheet-body"></div>
+    </aside>
+  </div>
+
   <!-- Niesparowany telefon widzi tylko to -->
   <div class="pair-screen" id="pair-screen" hidden>
     <div class="pair-card">
-      <div class="logo">BEE<span>NEST</span></div>
+      <div class="logo" role="img" aria-label="BEENest"><svg viewBox="0 0 1521 261" aria-hidden="true"><use href="{{ url_for('static', filename='logo.svg') }}#logo"></use></svg></div>
       <h1 id="pair-title">Sparuj to urządzenie z ulem</h1>
       <p class="lead" id="pair-lead">Na wyświetlaczu ula otwórz Ustawienia → Działanie → Sparuj urządzenie, a potem zeskanuj kod QR albo wpisz 6 cyfr.</p>
       <form id="pair-form" autocomplete="off">
@@ -815,6 +924,9 @@
         </label>
         <div class="pin-error" id="pair-error" aria-live="polite"></div>
         <button type="submit" class="modal-btn primary" id="pair-submit">Sparuj</button>
+        <!-- Android: pobranie aplikacji z ula; iPhone / iPad: dodanie do ekranu początkowego (app.js, sekcja 0) -->
+        <a class="modal-btn ghost pair-install" id="pair-install" hidden>Zainstaluj aplikację</a>
+        <p class="lead pair-install-help" id="pair-install-help" hidden></p>
       </form>
       <div class="pair-wait" id="pair-wait" hidden>
         <div class="modal-spinner"></div>
@@ -823,21 +935,34 @@
     </div>
   </div>
 
-  <!-- Wyświetlacz przy ulu: przyciemnienie (jasność) i zasłona uśpienia – app.js, sekcja 15 -->
+  <!-- Wyświetlacz przy ulu: przyciemnienie (jasność) i zasłona uśpienia – app.js, sekcja 14 -->
   <div class="dim" id="dim" aria-hidden="true"></div>
   <div class="sleep" id="sleep" hidden aria-hidden="true"></div>
 
-  <!-- Szybki konfigurator po sparowaniu (app.js, sekcja 12a): karty przesuwane od prawej do lewej -->
+  <!-- Szybki konfigurator po sparowaniu (app.js, sekcja 16): karty przesuwane od prawej do lewej -->
   <div class="setup" id="setup" hidden>
     <section class="setup-card" aria-labelledby="setup-title">
       <div class="setup-scroll">
-        <div class="logo">BEE<span>NEST</span></div>
+        <div class="logo" role="img" aria-label="BEENest"><svg viewBox="0 0 1521 261" aria-hidden="true"><use href="{{ url_for('static', filename='logo.svg') }}#logo"></use></svg></div>
         <h1 id="setup-title">Skonfigurujmy to urządzenie</h1>
         <!-- tu na czas konfiguratora trafia zakładka Wygląd z Ustawień -->
         <div id="setup-appearance"></div>
       </div>
       <div class="setup-actions">
         <button type="button" class="modal-btn primary" id="setup-next">Dalej</button>
+      </div>
+    </section>
+    <!-- Karta 2: skrót na ekranie głównym (pomijana, gdy strona jest już otwarta ze skrótu) -->
+    <section class="setup-card setup-done setup-home" id="setup-home" aria-labelledby="setup-home-title">
+      <img class="setup-home-icon" src="{{ url_for('static', filename='icons/bee.svg') }}" alt="">
+      <h2 id="setup-home-title">Zawsze pod ręką</h2>
+      <p class="lead"><span id="setup-home-first">Dodaj ikonę BEENest na ekran główny swojego urządzenia.</span> Ewentualnie, po podłączeniu się do Wi-Fi ula
+        przejdź na stronę <strong>http://beenest.local</strong><br>Dodać skrót możesz zawsze w zakładce <em>O aplikacji</em>
+        w ustawieniach.</p>
+      <div class="setup-home-actions">
+        <a class="modal-btn primary" id="setup-home-apk" download="beenest.apk" hidden>Pobierz aplikację</a>
+        <button type="button" class="modal-btn primary" id="setup-home-add">Dodaj do ekranu głównego</button>
+        <button type="button" class="modal-btn ghost" id="setup-home-later">Może później</button>
       </div>
     </section>
     <section class="setup-card setup-done" aria-labelledby="setup-done-title">
