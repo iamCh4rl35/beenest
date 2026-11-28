@@ -222,8 +222,8 @@ After=network.target NetworkManager.service
 User=$USER_NAME
 WorkingDirectory=$APP_DIR
 ExecStart=/usr/bin/python3 $APP_DIR/app.py
-# port 80 bez uruchamiania jako root
-AmbientCapabilities=CAP_NET_BIND_SERVICE
+# port 80 bez uruchamiania jako root; CAP_SYS_TIME – serwer ustawia zegar według internetu (app.py: sync_clock_loop)
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_SYS_TIME
 Environment=PYTHONUNBUFFERED=1
 Restart=always
 RestartSec=3

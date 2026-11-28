@@ -20,7 +20,7 @@ import hardware
 KEYS = ("f_level",)
 
 SENSOR_PINS = (17, 27, 22)          # od dołu do góry
-LIQUID_IS_HIGH = True               # False, jeśli czarny przewód podłączono odwrotnie (wysoki = brak cieczy)
+LIQUID_IS_HIGH = False              # wyjście odwrócone czarnym przewodem (2026-11-27): wysoki = brak cieczy
 LEVEL_PERCENT = (15, 40, 80, 100)   # poziom w %, gdy ciecz widzi: żaden, dolny, środkowy, górny czujnik
 # Słownie (strona, ustawienie „Słowny stan dokarmiaczki”): Wymaga napełnienia, Połowa zbiornika, Zapas płynu, Pełny
 

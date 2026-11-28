@@ -28,6 +28,10 @@ w „Contributors” na GitHubie (2026-11-20). Autor i push jako użytkownik (`i
 * Raspberry Pi 5 8 GB (Raspberry Pi OS na Debianie 13 trixie, hostname `raspberrypi`):
 `ssh beenest@192.168.1.219`, katalog **`/home/beenest/BEENest`** (tak jak na PC; nie „BEEnest”) — kopia na właściwej maszynie.
 Na Pi jest też `~/bme-env` (prawdopodobnie środowisko Pythona do BME280).
+* Laptop `archlaptop-kubik` w terenie (2026-11-27): internet z hotspotu iPhone'a (Wi-Fi), do Pi kabel Ethernet
+`enp0s31f6`, profil NM `do-ula` (shared 10.43.0.1/24 + IPv6 link-local). DHCP do Pi nie dochodzi (na laptopie
+aktywny ufw), ale działa IPv6 link-local: `ssh beenest@fe80::c186:8f1d:77b1:707%enp0s31f6` (klucz laptopa już
+jest na Pi). Adres Pi znaleziony przez `ping -6 ff02::1%enp0s31f6` + `ip -6 neigh`.
 * SSH: klucz PC `~/.ssh/id_ed25519` dodany na Pi (`ssh-copy-id`, 2026-11-20). Claude łączy się z `-o BatchMode=yes`.
 * Pulpit Pi: Wayland, kompozytor **labwc**, gniazdo `wayland-0`. Program graficzny przez SSH:
 `export WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/$(id -u); nohup chromium --ozone-platform=wayland >/tmp/chromium-ssh.log 2>&1 &`
@@ -201,6 +205,33 @@ prawie w pełnej skali (3 ostatnie trudno odróżnić) – lepiej o jeden stopie
 Plansza testowa: tylko tymczasowo w `static/test-kolorow.html` na Pi (usunięta, nie w repozytorium).
 * Użytkownik ma wyświetlacz Pi obok siebie i widzi go na żywo — można go prosić o sprawdzenie ekranu.
 
+* **Zegar i wylogowania (2026-11-27):** Pi 5 ma RTC bez baterii (RTC = 1970), fake-hwclock nie ma, systemd-timesyncd
+po starcie ustawia czas z mtime `/var/lib/systemd/timesync/clock` → po nagłym odcięciu prądu zegar się cofa
+(w terenie Pi pokazywało 22 listopada zamiast 27). Ciasteczko urządzenia ma znacznik czasu z ostatniego wejścia,
+więc itsdangerous odrzucał je („Signature age < 0”) = urządzenie „zapomniane” (wpisy w global.conf zostawały,
+ponowne parowanie dopisywało nowe). Poprawka: `ClockSafeSessionInterface` w app.py przyjmuje ciasteczko
+z przyszłości (podpis nadal sprawdzany, za stare dalej odrzucane). Sprawdzone na Pi (200 zamiast 401).
+* Czas z internetu: `sync_clock_loop()` przy starcie serwera (tylko Raspberry) – SNTP (pool.ntp.org, time.google.com,
+tempus1.gum.gov.pl), zapas: nagłówek Date z http://www.google.com/; próby co 30 s przez 10 min, różnica > 2 s →
+`time.clock_settime`. Wymaga `CAP_SYS_TIME` w beenest.service (dopisane w `pi/install.sh`, AmbientCapabilities) –
+**po wdrożeniu trzeba ponownie uruchomić `sudo bash pi/install.sh --lock`** (bez tego w dzienniku tylko komunikat).
+Użytkownik ma baterię RTC (2026-11-27, jeszcze niepodłączona); po podłączeniu: `dtparam=rtc_bbat_vchg=3000000`.
+* Model akumulatora w Safari: wersja `height: 100%` + aspect-ratio rozjeżdżała się (pudełko 183 px, model 415 px).
+Teraz `.battery-box` ma szerokość `min(40vw, (100vh − 300px)·220/180, 420px)`, SVG `width: 100%`. Sprawdzane
+w WebKitGTK (skrypt z `gi` WebKit2 4.1 + `Gtk.OffscreenWindow`; potrzebne `GDK_BACKEND=x11
+WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1`).
+* Czujniki cieczy XKC-Y25-V: zasilanie 5 V z Pi wystarcza (przetwornica Pololu niepotrzebna). Przy zasilaniu 12 V
+dzielnik 1k/2k dałby ~8 V na GPIO – trzeba by 10k/3,3k. Pi w terenie chwilowo zasilane z gniazdka (2026-11-27),
+dlatego IL (pobór z LOAD) = 0.
+
+* **Dokarmiaczka (2026-11-27):** czujniki cieczy odwrócone przez użytkownika czarnym przewodem → `LIQUID_IS_HIGH = False`
+(wysoki = brak cieczy). Skutek: odłączony / niezasilony czujnik (dzielnik 2 kΩ ściąga do masy) czyta się jako „ciecz”.
+Po wdrożeniu na Pi: GPIO17 hi, GPIO27 lo, GPIO22 lo → 100 % (czujniki 2 i 3 prawdopodobnie niepodłączone).
+Czujniki czyta osobny wątek `feeder_loop()` co `FEEDER_EVERY` = 1 s (dokarmiaczka wyjęta z `SENSORS`, sampler bierze
+`f_level` z `_latest`); strona `#feeder` odpytuje `/api/data` co 1 s, reszta co 5 s. Brzęczyk / alarm napełnienia
+(`detect_refill`): tylko gdy poziom dojdzie do pełna (`LEVEL_PERCENT[-1]`), a od ostatniego razu był niżej
+(wcześniej skok o 10 pkt → piszczało już przy 15 → 40 %). Zbiornik `.tank-body` też liczony szerokością (Safari).
+
 ## Uruchomienie
 
 ```
@@ -235,6 +266,7 @@ static/qr.js                    window.BeeQR – własny generator kodów QR (ba
 static/style.css                motywy, układ, animacje
 \*\_detector\_driver.py            po jednym na czujnik: read() -> {klucz: float | None}, KEYS = krotka kluczy
 buzzer\_driver.py                pusty (do zrobienia)
+battery\_detector\_driver.py      akumulator: Victron VE.Direct (wątek czyta port w tle), pola b_*
 data/beenest.db                 powstaje sam: tabela readings(ts, key, value) + kv (stan, np. f\_last)
 data/global.conf                powstaje sam: wszystkie ustawienia (patrz niżej)
 data/secret.key                 powstaje sam: klucz podpisujący ciasteczka (nowy = telefony do ponownego parowania)
@@ -250,7 +282,7 @@ używa ich `wellbeing\_status` w `app.py` i linie stref na wykresie.
 
 ### Strony (`#hash`)
 
-`home`, `monitoring` (kamera, klik = płynne powiększenie), `temperatura` (Atmosfera: temperatura,
+`home`, `battery` (akumulator), `monitoring` (kamera, klik = płynne powiększenie), `temperatura` (Atmosfera: temperatura,
 wilgotność, ciśnienie, w ulu / na zewnątrz, min i maks z 24 godzin + wykres), `samopoczucie`
 (kafelki + wykres częstotliwości ze strefami), `dokarmiaczka`, `wylotek`, `ustawienia`
 (pionowy dock: Wygląd / Działanie / Informacje).
@@ -307,7 +339,22 @@ klik = przybliżenie ×2, dwuklik (≤ 0,5 s) = reset.
 Alarm napełnienia to ustawienie urządzenia, ale też wymaga administratora (`ADMIN\_DEVICE\_SETTINGS`).
 Na szerokich ekranach Działanie ma dwie kolumny (`.settings-cols`), inaczej nie mieści się na 1024×600.
 Przyciski w Działaniu: wiersz z podpisem, opisem i przyciskiem po prawej (jak „Wymaż zapisane dane”).
-* Kłódka w `.topbar` na środku (siatka: logo | kłódka | zegar, od 851 px).
+* Pasek `.topbar` (2026-11-27): telefon (< 851 px, też aplikacja na Androida) = logo po lewej, `.topbar-side`
+(kłódka + akumulator) w prawym rogu, zegar zawija się pod spód (`order`); od 851 px siatka
+`.topbar-side` | logo na środku | zegar (każdy element `grid-row: 1`, inaczej `order` psuje układ).
+* Akumulator: `#battery-btn` w pasku (ikona akumulatora + procent, styl jak `.lock-btn`) → strona `#battery`
+(karta jak dokarmiaczka: parametry po lewej, model SVG po prawej w `.tank.battery-box`). Płyn = `--battery-y`
+na `#battery-model` (viewBox: 30 pełny, 166 – p·1,26, 170 pusty), fala = animacja właściwości `translate`,
+poziom = `transform` (składają się niezależnie). **Wspólny mechanizm płynu (2026-11-27):** klasy `.liquid-model`
+(na svg), `.liquid-wave` + `.liquid` (ścieżka fali), zmienna `--liquid-y`, funkcja `setLiquid(model, y, emptyY, full, rise)`
+w app.js. Używa go też zbiornik dokarmiaczki `#feeder-model` (viewBox 140×176: wnętrze 6–170, 176 pusty, 0 pełny;
+segmenty `.tank-seg` usunięte, ramka `--line` jak dawniej).
+Obrys, bieguny oraz znaki + i − modelu w `--black` (życzenie użytkownika: „czarna na bokach”, znaki jak ramka). Dane: `b_percent`
+(z napięcia tylko w spoczynku = CS 0/2 albo prąd ładowania I < 0,1 A: 11,8 V = 0 %, 12,85 V = 100 %;
+podtrzymanie = 100 %; przy ładowaniu ostatni procent ze spoczynku, po starcie serwera w trakcie ładowania „--”).
+Sterownik potrafi zgłaszać CS = 3 przy 0 A (wieczorem) – dlatego sam CS nie wystarcza. Wdrożone na Pi 2026-11-27
+(wskaźnik 93 % przy 12,78 V; zrzut `grim` z Pi miał wtedy 1024×768 – w terenie inny monitor?), `b_voltage`, `b_current` (= IL, prąd wyjścia LOAD),
+`b_panel` / `b_panel_percent` (100 % = `PANEL_MAX_W` 30 W), `b_state` (CS), `b_error`, `b_updated`.
 * Okna (`.modal`): przezroczystość animują `.modal-backdrop` i `.modal-card`, nie całe `.modal` —
 przy przezroczystym rodzicu `backdrop-filter` włącza się dopiero po animacji (rozmycie „wskakuje”).
 * W CSS nie pisz `font: 800 14px/1.2 inherit` — to nieprawidłowe i przeglądarka odrzuca całą linijkę;
@@ -359,6 +406,28 @@ przy oryginalnej kamerze dolutować przewody do pól + / − płytek): osobna pr
 Bez USB-PD Pi 5 ogranicza USB do 600 mA – po upewnieniu się, że przetwornica daje 5 A: EEPROM `PSU_MAX_CURRENT=5000`.
 * PWM na Pi 5 (do sprawdzenia przy wdrażaniu): `dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4`,
 sterowanie przez `/sys/class/pwm` (biblioteka standardowa).
+* **Serwo wylotka (debug 2026-11-27):** nakładka PWM działa (pwmchip0 = 1f00098000.pwm). Pomiar szybkim
+odczytem rejestru RP1 (`/dev/gpiomem0`, SYS_RIO0 SYNC_IN = offset 0x10008, bit 12): impulsy dokładne
+(1,00 / 2,00 ms co 20 ms), po `enable=0` linia trwale niska. Mimo to serwo ~1,5 s po komendzie samo wracało
+do 0 % (gaszenie impulsów po `MOVE_SECONDS`) → ten egzemplarz MG-996R bez sygnału jedzie do końca zakresu.
+Łatka: `HOLD = True` + odtworzenie zapisanej pozycji przy pierwszym `read()` po starcie, impulsy 500–2500 µs
+(było 1000–2000 = ~90°). `hardware.pwm_set` zerował `duty_cycle` przy każdej zmianie → gubił 1–2 impulsy
+(przerwy 60 ms); teraz zeruje tylko przy zmianie okresu. Wdrożone na Pi (scp + restart).
+Uwaga: `pkill -f BEENest/app.py` w poleceniu SSH zabija też własną powłokę (ten sam napis) – restartuj osobnym
+`ssh ... 'pkill -f [B]EENest/app.py'`.
+
+* **Przetwornica dla Pi (2026-11-28):** użytkownik chce zasilać Pi przez piny z Pololu D24V50F5 (#2851:
+wejście 6–38 V, 5 V ±4 %, typowo 5 A; pady co 2,54 mm VIN / GND ×2 / VOUT / EN, bez PG; EN i tak włączone).
+Propozycja: SmartSolar LOAD → bezpiecznik 4–5 A → VIN; VOUT → piny 2 i 4, GND → piny 6 i 9. Nigdy z panelu wprost,
+nie razem z USB-C. Jeszcze niepodłączone.
+
+* **Naświetlacze IR (2026-11-28):** sterowanie już jest w kodzie (`ir_driver.py`, GPIO23; `_ir()` w
+`camera_detector_driver.py` – świecą tylko z kamerą wewnętrzną, gasną z nią po `IDLE_STOP_S` = 10 s).
+Brakuje tylko układu. Uwaga (niepoprawione): `pinctrl` trzyma stan, więc restart / awaria serwera przy włączonej
+kamerze zostawia je zapalone do następnego wyłączenia kamery wewnętrznej.
+
+* Model naświetlaczy: Botland 4520 (OdSeven ODS-04520), 2 płytki 850 nm, 3,3 V, fotorezystor + potencjometr progu.
+Poboru producent nie podaje; opinia kupującego: ~0,4 A na płytkę (razem ~0,8 A, nie ~1,8 A) – zmierzyć.
 
 ## Do zrobienia / otwarte
 
@@ -366,7 +435,10 @@ sterowanie przez `/sys/class/pwm` (biblioteka standardowa).
 * Sterowanie wylotkiem (na razie tylko podgląd stanu), `buzzer\_driver.py`.
 * **Zasilanie solarne (planowanie, 2026-11-19):** panel → Victron SmartSolar MPPT 75/15 → akumulator 22 Ah → Pi.
 Odczyt przez VE.Direct (tryb tekstowy, 19200 bodów, blok co 1 s; tylko biblioteka standardowa: `termios`),
-jako nowy sterownik w stylu `*\_detector\_driver.py`. Bluetooth (Instant Readout) jest możliwy, ale wymaga
+jako nowy sterownik w stylu `*\_detector\_driver.py`. **Sprawdzone 2026-11-27:** kabel VE.Direct–USB = FTDI 0403:6015, `/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_*`
+→ `/dev/ttyUSB0` (grupa plugdev, beenest ma dostęp bez sudo); odczyt `termios` 19200 8N1 działa, pola: PID 0xA075, FW 166,
+V, I, VPV, PPV, CS, MPPT, OR, ERR, LOAD, IL, H19–H23, HSDS (mV / mA / W, H19–H22 w 0,01 kWh). Bez akumulatora sterownik milczy.
+Bluetooth (Instant Readout) jest możliwy, ale wymaga
 klucza z VictronConnect i nowej biblioteki. Odpowiedzi użytkownika: akumulator **żelowy MAXX 22 Ah 12 V**;
 Pi zasilane przez przetwornicę step-down do 5 V (źródło przetwornicy: wyjście LOAD czy akumulator –
 do ustalenia); połączenie „najdogodniej” → proponowany kabel VE.Direct–USB. Procent naładowania

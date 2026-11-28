@@ -79,8 +79,10 @@ def pwm_set(channel, period_ns, duty_ns):
             if os.access(f"{ch}/period", os.W_OK):
                 break
             time.sleep(0.02)
-    _write(f"{ch}/duty_cycle", 0)            # wypełnienie nie może być dłuższe niż okres – najpierw 0
-    _write(f"{ch}/period", int(period_ns))
+    with open(f"{ch}/period") as f:
+        if int(f.read()) != int(period_ns):  # wypełnienie nie może być dłuższe niż okres – najpierw 0
+            _write(f"{ch}/duty_cycle", 0)    # (tylko przy zmianie okresu: 0 przy tym samym okresie gubi impulsy)
+            _write(f"{ch}/period", int(period_ns))
     _write(f"{ch}/duty_cycle", int(duty_ns))
     _write(f"{ch}/enable", 1)
 

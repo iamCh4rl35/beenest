@@ -66,6 +66,16 @@
     out.f_last = Math.floor(now / 86400) * 86400 - 3600 * 5;
     out.o_position = saved.outlet;
     out.o_status = outletStatus(saved.outlet);
+    // akumulator i panel (battery_detector_driver.py): panel daje prąd tylko w dzień
+    const sun = Math.max(0, Math.sin((hour - 6) / 12 * Math.PI));
+    out.b_panel = Math.round(24 * sun);
+    out.b_panel_percent = out.b_panel / 30 * 100;
+    out.b_state = sun > 0 ? 3 : 0;
+    out.b_error = 0;
+    out.b_percent = 72;
+    out.b_voltage = sun > 0 ? 13.4 : 12.56;
+    out.b_current = 0.42 + Math.random() * 0.05;
+    out.b_updated = Math.floor(now);
     out.w_status = wellbeing(out.w_frequency, out.w_sound);
     out.w_updated = Math.floor(now);
     out.m_status = 'Offline';

@@ -242,6 +242,22 @@ body {
   aspect-ratio: 1521 / 261;
 }
 
+/* Telefon: logo po lewej, kłódka / akumulator w prawym rogu, zegar zawija się pod spód */
+.topbar-side {
+  order: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.topbar .logo {
+  order: 1;
+}
+
+.topbar .datetime {
+  order: 3;
+}
+
 .datetime {
   font-size: clamp(13px, 1.6vw, 16px);
   font-weight: 800;
@@ -680,8 +696,7 @@ body[data-contrast="high"] .stat.primary .unit {
   font-size: 14.5px;
 }
 
-/* Dokarmiaczka: model zbiornika jak bateria – opis po lewej, pionowy zbiornik z 4 częściami po prawej.
-   Części zapala renderFeeder() w app.js od dołu (.tank-body ma odwróconą kolejność). */
+/* Dokarmiaczka: opis po lewej, pionowy zbiornik z płynem po prawej (płyn i fala: .liquid-model niżej). */
 .tank-panel {
   flex: 1;                   /* zajmuje resztę ekranu pod kafelkami (.page to kolumna flex) */
   margin-bottom: 0;
@@ -725,28 +740,123 @@ body[data-contrast="high"] .stat.primary .unit {
   align-items: center;
 }
 
-.tank-body {
-  height: 100%;
-  min-height: 176px;
-  max-height: 420px;
+/* Szerokość liczona wprost, wysokość z proporcji viewBox. Wersja z height: 100% działała w Chrome, ale Safari liczył
+   szerokość osobno i zbiornik wychodził bokiem (jak model akumulatora). (100vh − 300px) = miejsce w karcie na 1024×600. */
+.tank-model {
+  display: block;
+  width: min(28vw, calc((100vh - 300px) * 140 / 176), 330px);
+  height: auto;
   aspect-ratio: 140 / 176;   /* około 4 : 5 – szerszy niż bateria, ale wciąż pionowy */
-  padding: 6px;
+  overflow: visible;
+  --liquid-y: 176px;
+}
+
+.tank-case {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 3.5;
+  transition: stroke .3s;
+}
+
+/* Akumulator: cztery parametry po lewej, model akumulatora po prawej (karta jak zbiornik dokarmiaczki).
+   Wysokość płynu = zmienna --liquid-y na #battery-model (renderBattery() w app.js, jednostki viewBox:
+   30 = pełny, 170 = pusty). Fala przesuwa się w poziomie (właściwość translate), poziom zmienia transform –
+   obie składają się niezależnie. Znaki + i − w kolorze obrysu. */
+.battery-info {
   display: flex;
-  flex-direction: column-reverse;
-  gap: 6px;
-  border: 3px solid var(--line);
-  border-radius: 18px;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.tank-seg {
-  flex: 1;
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--line) 60%, transparent);
-  transition: background var(--anim-duration);
+/* wielkość jak .tank-value (dokarmiaczka, wylotek) */
+.battery-value {
+  margin-top: 4px;
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 900;
+  letter-spacing: -.6px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
 }
 
-.tank-seg.is-on {
-  background: var(--orange);
+.battery-sub {
+  margin-left: 8px;
+  font-size: .62em;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+
+/* Szerokość modelu liczona wprost (wysokość wynika z proporcji viewBox). Wersja z height: 100% + aspect-ratio
+   działała w Chrome, ale Safari liczył szerokość pudełka osobno i model wychodził poza kartę.
+   (100vh - 300px) · 220/180 = model nie wyższy niż miejsce w karcie na 1024×600. */
+.battery-box {
+  align-self: center;
+  width: min(40vw, calc((100vh - 300px) * 220 / 180), 420px);
+}
+
+.battery-model {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 220 / 180;
+  overflow: visible;
+  --liquid-y: 170px;
+}
+
+/* obrys, bieguny i znaki czarne (kolor tekstu motywu – w ciemnych motywach jasny) */
+.battery-case {
+  fill: none;
+  stroke: var(--black);
+  stroke-width: 6;
+  transition: stroke .3s;
+}
+
+.battery-pole {
+  fill: var(--black);
+  transition: fill .3s;
+}
+
+
+.battery-sign {
+  fill: none;
+  stroke: var(--black);      /* jak obrys */
+  stroke-width: 7;
+  stroke-linecap: round;
+  transition: stroke .3s;
+}
+
+/* ---------- PŁYN Z FALĄ: wspólny dla zbiornika dokarmiaczki i modelu akumulatora ----------
+   Poziom = zmienna --liquid-y na .liquid-model (jednostki viewBox, liczy app.js: setLiquid). Fala przesuwa się
+   w poziomie (właściwość translate), poziom zmienia transform – obie składają się niezależnie. */
+.liquid-wave {
+  transform: translateY(var(--liquid-y));
+  transition: transform calc(var(--anim-duration) * 2) var(--anim-ease);
+  animation: liquid-wave 2.8s linear infinite;
+}
+
+.liquid {
+  fill: var(--orange);
+}
+
+/* pełny: płyn stoi (powierzchnia i tak jest nad krawędzią wnętrza) */
+.liquid-model.is-full .liquid-wave,
+.liquid-model.no-motion .liquid-wave {
+  animation: none;
+}
+
+.liquid-model.no-motion .liquid-wave {
+  transition: none;
+}
+
+@keyframes liquid-wave {
+  from { translate: 0 0; }
+  to   { translate: -50px 0; }      /* jeden okres fali = 50 jednostek viewBox */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liquid-wave {
+    animation: none;
+  }
 }
 
 /* Stan wylotka: opis i przyciski po lewej (przyciski w lewym dolnym rogu), model zasuwy po prawej.
@@ -2498,30 +2608,35 @@ body[data-contrast="high"] .chart-line {
 /* =====================================================
    ZABEZPIECZENIA: kłódka w pasku, PIN, blokada, parowanie, urządzenia, kody QR
    ===================================================== */
-/* Kłódka na środku paska: logo | kłódka | zegar */
+/* Pasek na szerokim ekranie (tablet, wyświetlacz): kłódka + akumulator | logo na środku | zegar.
+   grid-row: 1 – inaczej `order` z wersji telefonu przesuwałby elementy do drugiego wiersza. */
 @media (min-width: 851px) {
   .topbar {
     display: grid;
     grid-template-columns: 1fr auto 1fr;
   }
 
-  .topbar .logo {
+  .topbar .topbar-side {
+    grid-row: 1;
     grid-column: 1;
     justify-self: start;
   }
 
-  .topbar .lock-btn {
+  .topbar .logo {
+    grid-row: 1;
     grid-column: 2;
   }
 
   .topbar .datetime {
+    grid-row: 1;
     grid-column: 3;
     justify-self: end;
   }
 }
 
 /* Kłódka (tylko wyświetlacz): Odblokuj Panel / Zahasłuj Panel / Klucz zainstalowany w USB */
-.lock-btn {
+.lock-btn,
+.battery-btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -2536,11 +2651,18 @@ body[data-contrast="high"] .chart-line {
   transition: background .2s, color .2s, filter .2s;
 }
 
-.lock-btn:hover {
+.battery-btn {
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.lock-btn:hover,
+.battery-btn:hover {
   filter: brightness(.95);
 }
 
-.lock-btn svg {
+.lock-btn svg,
+.battery-btn svg {
   width: 18px;
   height: 18px;
   fill: none;
@@ -2561,7 +2683,8 @@ body[data-contrast="high"] .lock-btn[data-mode="key"] {
   color: var(--bg);
 }
 
-.lock-btn:focus-visible {
+.lock-btn:focus-visible,
+.battery-btn:focus-visible {
   outline: 2px solid var(--orange);
   outline-offset: 2px;
 }
@@ -3781,7 +3904,7 @@ body[data-device="display"][data-theme="honey-grey"] .quad-tile {
 }
 
 /* ---------- APLIKACJA NA ANDROIDA (body[data-app="android"]) ----------
-   Bez zegara, logo na środku paska; strona rysuje się pod paskiem stanu i nawigacji, więc dostaje ich
+   Bez zegara, logo po lewej i akumulator po prawej (jak w wersji na telefon); strona rysuje się pod paskiem stanu i nawigacji, więc dostaje ich
    wysokość (--safe-*, app.js sekcja 0a). */
 body[data-app="android"] .datetime {
   display: none;
@@ -3789,7 +3912,7 @@ body[data-app="android"] .datetime {
 
 body[data-app="android"] .topbar {
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
   padding-top: calc(15px + var(--safe-top, 0px));
   padding-left: calc(clamp(16px, 3vw, 30px) + var(--safe-left, 0px));
   padding-right: calc(clamp(16px, 3vw, 30px) + var(--safe-right, 0px));
@@ -4009,10 +4132,20 @@ body.is-demo .topbar {
     align-self: center;
   }
 
-  .tank-body {
-    height: auto;
-    min-height: 0;
+  .tank-model {
     width: clamp(110px, 40vw, 180px);
+  }
+
+  /* akumulator: model nad parametrami, szerokość z ekranu */
+  .battery-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .battery-box {
+    order: -1;
+    align-self: center;
+    width: min(100%, 300px);
   }
 
   /* wylotek: duży model zasuwy nad opisem, suwak na całą szerokość */

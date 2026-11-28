@@ -1026,7 +1026,8 @@
     w_frequency: 0, w_sound: 0,
     f_level: 0,
     o_position: 0,
-    m_signal: 0
+    m_signal: 0,
+    b_percent: 0, b_voltage: 2, b_current: 2, b_panel: 0, b_panel_percent: 0
   };
 
   const isNum = v => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
@@ -1040,6 +1041,8 @@
       return d ? d.toLocaleString('pl-PL', { dateStyle: 'medium', timeStyle: 'short' }) : String(v);
     }
     if (key === 'm_updated') return isNum(v) ? Math.round(Number(v)) + ' s temu' : String(v);
+    if (key === 'b_updated') { const d = toDate(v); return d ? d.toLocaleTimeString('pl-PL') : '--'; }
+    if (key === 'b_state') return batteryState();
     if (key in DECIMALS) {
       if (!isNum(v)) return '--';
       const s = Number(v).toFixed(DECIMALS[key]);
@@ -1175,28 +1178,22 @@
     return n === null ? '--' : FEEDER_WORDS[n];
   }
 
-  // Wejście na stronę Dokarmiaczka: model zbiornika „ładuje się” od dołu do obecnego poziomu w TANK_FILL_MS.
-  // Bez danych (pierwsze wejście prosto na #dokarmiaczka) animacja czeka na pierwszy odczyt.
-  const TANK_FILL_MS = 500;
-  let tankPending = location.hash === '#feeder', tankAnimating = false;
-  function fillTank(n) {
-    const segs = [...document.querySelectorAll('#feeder-tank .tank-seg')];
-    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
-    tankAnimating = true;
-    segs.forEach(seg => { seg.style.transition = 'none'; seg.classList.remove('is-on'); });
-    void document.body.offsetHeight;                   // przeglądarka musi najpierw narysować pusty zbiornik
-    const lit = n + 1, step = TANK_FILL_MS / lit;      // każda część zapala się po poprzedniej
-    segs.forEach((seg, i) => {
-      seg.style.transition = 'background ' + step + 'ms linear ' + (i * step) + 'ms';
-      seg.classList.toggle('is-on', i < lit);
-    });
-    setTimeout(() => {
-      segs.forEach(seg => { seg.style.transition = ''; });
-      tankAnimating = false;
-      renderFeeder();                                  // poziom mógł się zmienić w trakcie
-    }, TANK_FILL_MS);
-    return true;
+  // Płyn z falą (zbiornik dokarmiaczki, model akumulatora): poziom = --liquid-y w jednostkach viewBox.
+  // rise = wejście na stronę: najpierw pusty (emptyY), potem płynne napełnienie do y.
+  function setLiquid(model, y, emptyY, full, rise) {
+    model.classList.toggle('is-full', full);
+    if (rise) {
+      model.classList.add('no-motion');
+      model.style.setProperty('--liquid-y', emptyY + 'px');
+      void model.getBoundingClientRect();
+      model.classList.remove('no-motion');
+    }
+    model.style.setProperty('--liquid-y', y + 'px');
   }
+  // Zbiornik: wnętrze y od 6 (góra) do 170 (dół); 176 = pusty, pełny 0 (doliny fali ± 5 nad krawędzią wnętrza)
+  const tankY = p => (!isNum(p) ? 176 : Number(p) >= 99.5 ? 0 : 170 - Math.max(0, Number(p)) / 100 * 164);
+  // Wejście na stronę Dokarmiaczka: płyn podnosi się od dna; bez danych czeka na pierwszy odczyt
+  let tankPending = location.hash === '#feeder';
   window.addEventListener('hashchange', () => {
     if (location.hash === '#feeder') { tankPending = true; renderFeeder(); }
   });
@@ -1218,15 +1215,12 @@
     if ($('f-level-value')) $('f-level-value').classList.toggle('small', words);
     if ($('f-level-unit')) $('f-level-unit').hidden = words;
 
-    // Model zbiornika (strona Dokarmiaczka): części od dołu – 1 część = żaden czujnik nie widzi cieczy (15 %)
+    // Model zbiornika (strona Dokarmiaczka): płyn do poziomu z czujników (15 % = żaden czujnik nie widzi cieczy)
     const n = feederSensors(state.f_level);
     if ($('f-level-label')) $('f-level-label').textContent = words ? feederWord(state.f_level) : withUnit('f_level', '%');
-    if (tankPending && n !== null && $('feeder') && $('feeder').classList.contains('active')) {
-      tankPending = false;
-      fillTank(n) || document.querySelectorAll('#feeder-tank .tank-seg').forEach((seg, i) => seg.classList.toggle('is-on', i <= n));
-    } else if (!tankAnimating) {
-      document.querySelectorAll('#feeder-tank .tank-seg').forEach((seg, i) => seg.classList.toggle('is-on', n !== null && i <= n));
-    }
+    const rise = tankPending && n !== null && $('feeder').classList.contains('active');
+    if (rise) tankPending = false;
+    setLiquid($('feeder-model'), tankY(state.f_level), 176, isNum(state.f_level) && Number(state.f_level) >= 99.5, rise);
     if ($('f-level-desc')) {
       $('f-level-desc').textContent = n === null ? 'Brak odczytu z czujników cieczy.'
         : n === 0 ? 'Żaden z trzech czujników nie wykrywa cieczy.'
@@ -1237,6 +1231,34 @@
       $('dash-feeder-compact').classList.toggle('is-long', text.length > 12);
     }
     if ($('dash-feeder-caption')) $('dash-feeder-caption').textContent = caption;
+  }
+
+  /* --- Akumulator (battery_detector_driver.py): wskaźnik w pasku i strona #battery --- */
+  // Stan ładowania z pola CS sterownika Victron
+  const BATTERY_STATES = { 0: 'Nie ładuje', 2: 'Usterka', 3: 'Ładowanie główne', 4: 'Absorpcja', 5: 'Podtrzymanie',
+    7: 'Wyrównywanie', 245: 'Uruchamianie', 247: 'Automatyczne wyrównywanie', 252: 'Sterowanie zewnętrzne' };
+  function batteryState() {
+    if (!isNum(state.b_state)) return '--';
+    if (isNum(state.b_error) && Number(state.b_error) !== 0) return 'Błąd sterownika (kod ' + Number(state.b_error) + ')';
+    return BATTERY_STATES[Number(state.b_state)] || 'Nieznany stan';
+  }
+  // Płyn w modelu: wnętrze obudowy ma y od 40 (góra) do 166 (dół) w jednostkach viewBox; 170 = pusty,
+  // pełny: 30, żeby doliny fali (± 5) też były nad krawędzią wnętrza
+  const batteryY = p => (!isNum(p) ? 170 : Number(p) >= 99.5 ? 30 : 166 - Math.max(0, Number(p)) / 100 * 126);
+  // Wejście na stronę: płyn podnosi się od dna (jak zbiornik dokarmiaczki); bez danych czeka na pierwszy odczyt
+  let batteryPending = location.hash === '#battery';
+  window.addEventListener('hashchange', () => {
+    if (location.hash === '#battery') { batteryPending = true; renderBattery(); }
+  });
+
+  function renderBattery() {
+    const p = state.b_percent;
+    $('battery-btn-text').textContent = isNum(p) ? Math.round(Number(p)) + ' %' : '-- %';
+    $('b-panel-watts').textContent = isNum(state.b_panel) ? '· ' + format('b_panel', state.b_panel) + ' W' : '';
+
+    const rise = batteryPending && isNum(p) && $('battery').classList.contains('active');
+    if (rise) batteryPending = false;
+    setLiquid($('battery-model'), batteryY(p), 170, isNum(p) && Number(p) >= 99.5, rise);
   }
 
   function render() {
@@ -1265,6 +1287,7 @@
     renderWellbeing();
     renderFeeder();
     renderOutlet();
+    renderBattery();
   }
 
   /* ===== 10. API dla Pythona / testów ===== */
@@ -1306,7 +1329,12 @@
       if (cam !== settings.camera) poll();
     }
   }
-  setInterval(poll, 5000);
+  // Co 5 s; na stronie Dokarmiaczka co 1 s (serwer czyta czujniki cieczy co sekundę – app.py: feeder_loop)
+  let pollTick = 0;
+  setInterval(() => {
+    pollTick++;
+    if (location.hash === '#feeder' || pollTick % 5 === 0) poll();
+  }, 1000);
 
   /* ===== 12. PRZYCISKI W USTAWIENIACH (zasilanie, aktualizacja) ===== */
   function bindAction(id, handler) {

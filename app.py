@@ -54,11 +54,14 @@ import time
 
 import flask.cli
 from flask import Flask, Response, g, jsonify, redirect, render_template, request, session
+from flask.sessions import SecureCookieSessionInterface
+from itsdangerous import BadSignature, SignatureExpired
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.serving import WSGIRequestHandler
 from werkzeug.wsgi import ClosingIterator
 
 import atmosphere_detector_driver as atmosphere
+import battery_detector_driver as battery
 import camera_detector_driver as camera
 import feeder_detector_driver as feeder
 import outlet_detector_driver as outlet
@@ -77,7 +80,7 @@ MDNS_NAME = "beenest"       # adres w sieci lokalnej: http://beenest.local
 
 SAMPLE_EVERY = 5            # s    – jak często czytamy czujniki
 CAMERA_OFFLINE_AFTER = 10   # s    – brak klatki dłużej niż tyle = kamera offline
-REFILL_JUMP = 10            # pkt% – o tyle musi wzrosnąć poziom, by uznać napełnienie
+FEEDER_EVERY = 1            # s    – czujniki cieczy dokarmiaczki czytamy częściej niż resztę (brzęczyk od razu)
 REFILL_COOLDOWN = 60        # s    – kolejne napełnienie liczymy najwcześniej po tylu sekundach
 
 # Progi oceny "Stan rodziny" są w wellbeing_detector_driver.py (tam je zmieniaj)
@@ -88,7 +91,7 @@ OUTLET_BLOCKED_BELOW = 5
 OUTLET_OPEN_ABOVE = 95
 OUTLET_MAX_RULES = 6        # reguły otwarcia wylotka o godzinie (global.conf [outlet])
 
-SENSORS = (atmosphere, wellbeing, feeder, outlet)
+SENSORS = (atmosphere, wellbeing, outlet, battery)     # dokarmiaczkę czyta osobno feeder_loop (co 1 s)
 
 # Co trafia do historii. Dane dokarmiaczki tylko, gdy włączone "Zapisuj tempo rozładowania".
 HISTORY_KEYS = ("temp_current", "temp_outside",
@@ -223,6 +226,36 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=REMEMBER_DAYS),
 )
+
+
+class ClockSafeSessionInterface(SecureCookieSessionInterface):
+    """
+    Ciasteczko urządzenia odporne na cofnięty zegar. Raspberry nie ma baterii zegara i w terenie nie ma internetu,
+    więc po nagłym odcięciu prądu startuje z godziną wcześniejszą niż przed wyłączeniem. Ciasteczko odnowione tuż
+    przed odcięciem ma wtedy znacznik czasu „z przyszłości”, a Flask (itsdangerous) odrzuca je jako
+    „Signature age < 0” – zapamiętane urządzenie widziało ekran parowania. Tu takie ciasteczko jest przyjmowane
+    (podpis nadal musi się zgadzać); za stare ciasteczko dalej jest odrzucane.
+    """
+
+    def open_session(self, app, request):
+        s = self.get_signing_serializer(app)
+        if s is None:
+            return None
+        val = request.cookies.get(self.get_cookie_name(app))
+        if not val:
+            return self.session_class()
+        try:
+            return self.session_class(s.loads(val, max_age=int(app.permanent_session_lifetime.total_seconds())))
+        except SignatureExpired as e:
+            if e.date_signed and e.payload is not None \
+                    and e.date_signed > datetime.datetime.now(datetime.timezone.utc):
+                return self.session_class(s.load_payload(e.payload))
+            return self.session_class()
+        except BadSignature:
+            return self.session_class()
+
+
+app.session_interface = ClockSafeSessionInterface()
 
 
 def log(msg):
@@ -683,15 +716,17 @@ def last_refill_time():
 
 def detect_refill(level, now):
     """
-    Napełnienie = poziom wzrósł o REFILL_JUMP punktów względem najniższego ostatnio widzianego.
-    Dzięki temu działa też przy powolnym nalewaniu (kilka małych skoków pod rząd).
+    Napełnienie = zbiornik doszedł do pełna (górny czujnik widzi ciecz), a od ostatniego napełnienia był niżej.
+    Wcześniej wystarczał wzrost o 10 punktów, więc brzęczyk odzywał się już przy połowie (15 → 40 %).
+    Pierwszy odczyt po starcie serwera tylko zapamiętuje poziom (bez alarmu).
     """
     if level is None:
         return
+    full = feeder.LEVEL_PERCENT[-1]
     low = _state["feeder_low"]
     if low is None or level < low:
         _state["feeder_low"] = level
-    elif level - low >= REFILL_JUMP:
+    elif level >= full > low:
         _state["feeder_low"] = level
         if now - _state["last_refill"] >= REFILL_COOLDOWN:
             _state["last_refill"] = now
@@ -793,7 +828,7 @@ def sample_once():
     with _sample_lock:
         now = time.time()
         raw = read_sensors()
-        detect_refill(raw["f_level"], now)
+        raw["f_level"] = _latest.get("f_level")      # dokarmiaczka ma własny, szybszy odczyt (feeder_loop)
         run_outlet_rules(now)
         save_history(raw, get_server_settings(), now)
         _latest = build_payload(raw, now)
@@ -815,8 +850,25 @@ def sampler_loop():
         time.sleep(SAMPLE_EVERY)
 
 
+def feeder_loop():
+    """Czujniki cieczy co FEEDER_EVERY s: wykrycie napełnienia (brzęczyk) i świeży poziom dla strony."""
+    while True:
+        try:
+            level = to_number(feeder.read().get("f_level"))
+            now = time.time()
+            detect_refill(level, now)
+            if _latest:                 # przypisanie w słowniku jest atomowe (jak w move_outlet)
+                _latest["f_level"] = level
+                _latest["f_last"] = last_refill_time()
+            track("feeder")
+        except Exception as e:
+            track("feeder", e)
+        time.sleep(FEEDER_EVERY)
+
+
 def start_sampler():
     threading.Thread(target=sampler_loop, name="sampler", daemon=True).start()
+    threading.Thread(target=feeder_loop, name="feeder", daemon=True).start()
 
 
 # -------------------------------------------------------------
@@ -1041,6 +1093,79 @@ def power(action):
     if os.geteuid() != 0:
         cmd = ["sudo", "-n"] + cmd
     run_system_command(cmd, timeout=30)
+
+
+# -------------------------------------------------------------
+#  Zegar: czas z internetu przy starcie serwera
+# -------------------------------------------------------------
+# Raspberry nie ma baterii zegara – po odcięciu prądu startuje ze starą godziną. systemd-timesyncd sam ustawia
+# czas, gdy dosięgnie serwera NTP; tu dodatkowo przy każdym starcie serwera pytamy NTP, a gdy port 123 jest
+# zablokowany – nagłówek Date z serwera WWW. Ustawienie zegara wymaga uprawnienia CAP_SYS_TIME (pi/install.sh
+# dopisuje je usłudze beenest.service); bez niego tylko komunikat w dzienniku.
+NTP_SERVERS = ("pool.ntp.org", "time.google.com", "tempus1.gum.gov.pl")
+HTTP_TIME_URLS = ("http://www.google.com/", "http://www.cloudflare.com/")
+CLOCK_TOLERANCE = 2          # s   – mniejszej różnicy nie poprawiamy
+CLOCK_TRY_FOR = 10 * 60      # s   – tyle po starcie próbujemy (sieć wstaje po serwerze)
+CLOCK_TRY_EVERY = 30         # s
+
+
+def ntp_time(host, timeout=3):
+    """Czas z serwera NTP (SNTP, sama biblioteka standardowa) – sekundy od 1970."""
+    packet = b"\x1b" + 47 * b"\0"             # wersja 3, tryb klienta
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.settimeout(timeout)
+        sent = time.time()
+        sock.sendto(packet, (host, 123))
+        data, _ = sock.recvfrom(48)
+        delay = (time.time() - sent) / 2
+    seconds, fraction = int.from_bytes(data[40:44], "big"), int.from_bytes(data[44:48], "big")
+    if not seconds:
+        raise OSError("pusta odpowiedź NTP")
+    return seconds - 2208988800 + fraction / 2 ** 32 + delay    # NTP liczy od 1900
+
+
+def http_time(url, timeout=4):
+    """Czas z nagłówka Date serwera WWW (dokładność 1 s) – zapas, gdy NTP jest zablokowane."""
+    import email.utils
+    import urllib.request
+    req = urllib.request.Request(url, method="HEAD")
+    with urllib.request.urlopen(req, timeout=timeout) as res:
+        date = res.headers.get("Date")
+    if not date:
+        raise OSError("brak nagłówka Date")
+    return email.utils.parsedate_to_datetime(date).timestamp() + 0.5
+
+
+def internet_time():
+    """(czas, źródło) albo (None, None), gdy nie ma internetu."""
+    for host in NTP_SERVERS:
+        with contextlib.suppress(OSError, ValueError):
+            return ntp_time(host), host
+    for address in HTTP_TIME_URLS:
+        with contextlib.suppress(OSError, ValueError):
+            return http_time(address), address
+    return None, None
+
+
+def sync_clock_loop():
+    """Przy starcie serwera: pobiera czas z internetu i poprawia zegar, jeśli się różni."""
+    end = time.monotonic() + CLOCK_TRY_FOR
+    while time.monotonic() < end:
+        now, source = internet_time()
+        if now is not None:
+            diff = now - time.time()
+            if abs(diff) <= CLOCK_TOLERANCE:
+                log(f"zegar: zgodny z internetem ({source})")
+                return
+            try:
+                time.clock_settime(time.CLOCK_REALTIME, now)
+                log(f"zegar: poprawiony o {diff:+.0f} s według {source} – teraz {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            except (OSError, AttributeError) as e:
+                log(f"zegar: różni się od internetu o {diff:+.0f} s, ale nie mogę go ustawić ({e}) – "
+                    f"uruchom ponownie: sudo bash pi/install.sh")
+            return
+        time.sleep(CLOCK_TRY_EVERY)
+    log("zegar: brak internetu – zostaje czas z Raspberry (bez baterii zegara może być cofnięty)")
 
 
 def error_text(e):
@@ -2188,6 +2313,8 @@ if __name__ == "__main__":
     # tylko w tym, który faktycznie obsługuje żądania.
     if not DEBUG or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         start_sampler()
+        if sys.platform.startswith("linux") and os.path.exists("/proc/device-tree/model"):   # tylko Raspberry
+            threading.Thread(target=sync_clock_loop, name="clock", daemon=True).start()
         threading.Thread(target=update_boot_logo, daemon=True).start()
         threading.Thread(target=usb_loop, name="usb", daemon=True).start()
         # Po restarcie serwera strona nie pamięta uśpienia – obraz musi być włączony, inaczej dotyk
